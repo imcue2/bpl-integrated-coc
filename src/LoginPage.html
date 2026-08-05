@@ -58,12 +58,15 @@
       this.textContent = showing ? 'Show' : 'Hide';
     });
 
-    function goWithToken(token) {
-      // Never expose the token in the address bar's query on redirect — swap
-      // the location without adding it to browser history as visible text.
-      var url = window.location.pathname + window.location.search.replace(/[?&]token=[^&]*/, '');
-      var sep = url.indexOf('?') === -1 ? '?' : '&';
-      window.top.location.href = url + sep + 'token=' + encodeURIComponent(token);
+    function goWithToken(token, appUrl) {
+      // A relative string assigned to window.top.location.href does NOT
+      // resolve against window.top's own URL — relative URL resolution
+      // always uses the calling script's own base URL, which here is the
+      // sandboxed googleusercontent.com iframe (e.g. .../userCodeAppPanel),
+      // never the real /macros/s/.../exec page. The server hands back its
+      // own absolute exec URL (ScriptApp.getService().getUrl()) precisely
+      // so this redirect has no relative URL to get wrong.
+      window.top.location.href = appUrl + '?token=' + encodeURIComponent(token);
     }
 
     document.getElementById('loginForm').addEventListener('submit', function (e) {
@@ -74,7 +77,7 @@
       google.script.run
         .withSuccessHandler(function (res) {
           if (res.status === 'OK') {
-            goWithToken(res.token);
+            goWithToken(res.token, res.appUrl);
           } else if (res.status === 'MUST_CHANGE_PASSWORD') {
             document.getElementById('loginForm').style.display = 'none';
             document.getElementById('resetForm').style.display = 'block';
@@ -100,7 +103,7 @@
       google.script.run
         .withSuccessHandler(function (res) {
           if (res.status === 'OK') {
-            goWithToken(res.token);
+            goWithToken(res.token, res.appUrl);
           } else {
             msg.textContent = res.message || 'Could not set new password.'; msg.className = 'msg error';
           }

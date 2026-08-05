@@ -58,7 +58,7 @@ function loginUser(email, password) {
 
   var token = createSession_(user);
   updateLastLogin_(user['User ID']);
-  return { status: 'OK', token: token };
+  return { status: 'OK', token: token, appUrl: ScriptApp.getService().getUrl() };
 }
 
 /** Called from Login.html to complete the mandatory reset flow. */
@@ -79,7 +79,7 @@ function completePasswordReset(userId, newPassword) {
 
   var token = createSession_(user);
   updateLastLogin_(userId);
-  return { status: 'OK', token: token };
+  return { status: 'OK', token: token, appUrl: ScriptApp.getService().getUrl() };
 }
 
 function updateLastLogin_(userId) {
