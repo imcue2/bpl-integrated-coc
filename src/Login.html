@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('Stylesheet'); ?>
+  <style>
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--navy); }
+    .login-box { background: #fff; border-radius: 10px; padding: 2rem; width: 320px; }
+    .login-box h1 { font-size: 1.1rem; margin: 0 0 0.25rem; }
+    .login-box p.sub { color: var(--muted); font-size: 0.82rem; margin: 0 0 1.25rem; }
+    .pw-wrap { position: relative; }
+    .pw-wrap input { width: 100%; padding-right: 2.2rem; }
+    .pw-toggle { position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); font-size: 0.75rem; cursor: pointer; color: var(--muted); user-select: none; }
+    button.primary { width: 100%; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <h1><?= moduleName ?></h1>
+    <p class="sub">Opened directly — sign in below, or launch this module from the BPL Integrated Monitoring hub.</p>
+
+    <form id="loginForm">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" name="email" required autofocus>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <div class="pw-wrap">
+          <input type="password" name="password" id="loginPassword" required>
+          <span class="pw-toggle" id="pwToggle">Show</span>
+        </div>
+      </div>
+      <button class="primary" type="submit">Sign In</button>
+      <div class="msg" id="loginMsg"></div>
+    </form>
+
+    <form id="resetForm" style="display:none;">
+      <p class="sub">Your password must be changed before continuing.</p>
+      <div class="field">
+        <label>New Password</label>
+        <input type="password" name="newPassword" required minlength="8">
+      </div>
+      <div class="field">
+        <label>Confirm New Password</label>
+        <input type="password" name="confirmPassword" required minlength="8">
+      </div>
+      <button class="primary" type="submit">Set New Password &amp; Continue</button>
+      <div class="msg" id="resetMsg"></div>
+    </form>
+  </div>
+
+  <script>
+    document.getElementById('pwToggle').addEventListener('click', function () {
+      var pw = document.getElementById('loginPassword');
+      var showing = pw.type === 'text';
+      pw.type = showing ? 'password' : 'text';
+      this.textContent = showing ? 'Show' : 'Hide';
+    });
+
+    function goWithToken(token) {
+      // Never expose the token in the address bar's query on redirect — swap
+      // the location without adding it to browser history as visible text.
+      var url = window.location.pathname + window.location.search.replace(/[?&]token=[^&]*/, '');
+      var sep = url.indexOf('?') === -1 ? '?' : '&';
+      window.top.location.href = url + sep + 'token=' + encodeURIComponent(token);
+    }
+
+    document.getElementById('loginForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var f = e.target;
+      var msg = document.getElementById('loginMsg');
+      msg.textContent = ''; msg.className = 'msg';
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (res.status === 'OK') {
+            goWithToken(res.token);
+          } else if (res.status === 'MUST_CHANGE_PASSWORD') {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('resetForm').style.display = 'block';
+            document.getElementById('resetForm').dataset.userId = res.userId;
+          } else {
+            msg.textContent = res.message || 'Invalid email or password.';
+            msg.className = 'msg error';
+          }
+        })
+        .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
+        .loginUser(f.email.value, f.password.value);
+    });
+
+    document.getElementById('resetForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var f = e.target;
+      var msg = document.getElementById('resetMsg');
+      msg.textContent = ''; msg.className = 'msg';
+      if (f.newPassword.value !== f.confirmPassword.value) {
+        msg.textContent = 'Passwords do not match.'; msg.className = 'msg error';
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(function (res) {
+          if (res.status === 'OK') {
+            goWithToken(res.token);
+          } else {
+            msg.textContent = res.message || 'Could not set new password.'; msg.className = 'msg error';
+          }
+        })
+        .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
+        .completePasswordReset(document.getElementById('resetForm').dataset.userId, f.newPassword.value);
+    });
+  </script>
+</body>
+</html>

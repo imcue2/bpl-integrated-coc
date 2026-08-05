@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('Stylesheet'); ?>
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <div class="title"><?= moduleName ?></div>
+      <div class="user">
+        <?= session.payload.fullName || session.userId ?>
+        &middot; <?= access.role ?><?= access.branchScope && access.branchScope !== 'N/A' ? ' (' + access.branchScope + ')' : '' ?>
+      </div>
+    </div>
+    <div class="version">v<?= version ?></div>
+  </header>
+
+  <?
+    var isAdminLike = (access.role === 'SuperUser' || access.role === 'Branch Admin' || access.role === 'Admin');
+    var canEditHere = isAdminLike || access.role === 'Staff';
+    // Section 4.2: Tab Scope only applies to Role = Staff; blank = all tabs.
+    var tabScopeList = (access.role === 'Staff' && access.tabScope) ?
+      String(access.tabScope).split(',').map(function (s) { return s.trim(); }) : null;
+    function tabVisible(label) {
+      if (!tabScopeList) return true;
+      return tabScopeList.indexOf(label) !== -1;
+    }
+  ?>
+  <nav class="tabs" id="tabs">
+    <? if (tabVisible('Dashboard')) { ?><button data-tab="dashboard" class="active">Dashboard</button><? } ?>
+    <? if (tabVisible('Forecast by ETA')) { ?><button data-tab="forecastEta">Forecast by ETA</button><? } ?>
+    <? if (tabVisible('Forecast by Job')) { ?><button data-tab="forecastJob">Forecast by Job</button><? } ?>
+    <? if (canEditHere && tabVisible('Register Job')) { ?><button data-tab="registerJob">Register Job</button><? } ?>
+    <? if (canEditHere && tabVisible('Dial-up')) { ?><button data-tab="dialUp">Dial-up</button><? } ?>
+    <? if (canEditHere && tabVisible('Top-up')) { ?><button data-tab="topUp">Top-up</button><? } ?>
+    <? if (isAdminLike) { ?>
+      <button data-tab="manageData">Manage Data</button>
+      <button data-tab="auditLog">Audit Log</button>
+      <button data-tab="manageError">Manage Error</button>
+    <? } ?>
+  </nav>
+
+  <main>
+    <section class="panel active" id="panel-dashboard">
+      <div class="toolbar">
+        <div class="field" style="margin-bottom:0;">
+          <label for="dashboardClientFilter">Filter: Client Name</label>
+          <select id="dashboardClientFilter"></select>
+        </div>
+      </div>
+      <div class="cards" id="dashboardCards"></div>
+
+      <div class="section-title">Forecast by ETA</div>
+      <div id="dashboardEtaTable" style="margin-bottom:1.5rem;"></div>
+    </section>
+
+    <section class="panel" id="panel-forecastEta">
+      <div class="toolbar">
+        <div class="field" style="margin-bottom:0;">
+          <label for="etaClientFilter">Client Name</label>
+          <select id="etaClientFilter"></select>
+        </div>
+      </div>
+      <div id="forecastEtaTable"></div>
+    </section>
+
+    <section class="panel" id="panel-forecastJob">
+      <div class="toolbar">
+        <div class="field" style="margin-bottom:0;">
+          <label for="jobClientFilter">Client Name</label>
+          <select id="jobClientFilter"></select>
+        </div>
+      </div>
+      <div id="forecastJobTable"></div>
+    </section>
+
+    <section class="panel" id="panel-registerJob">
+      <div class="section-title">Register Job</div>
+      <form class="card-form" id="registerJobForm">
+        <div class="field">
+          <label>Client Name</label>
+          <select name="clientName" required></select>
+        </div>
+        <div class="field">
+          <label>Job #</label>
+          <input type="text" name="jobNumber" required>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Vessel ETA</label>
+            <input type="date" name="vesselEta" required>
+          </div>
+          <div class="field">
+            <label>Voyage #</label>
+            <input type="text" name="voyageNumber">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Vessel Name</label>
+            <select name="vesselName" required></select>
+          </div>
+          <div class="field">
+            <label>Port</label>
+            <select name="port" required></select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Amount</label>
+          <input type="number" step="0.01" min="0" name="amount" required>
+        </div>
+        <div class="field">
+          <label>Remarks</label>
+          <input type="text" name="remarks" placeholder="Please enter your notes – e.g. Red lane, Yellow lane, etc..">
+        </div>
+        <button class="primary" type="submit">Register Job</button>
+        <div class="msg" id="registerJobMsg"></div>
+      </form>
+    </section>
+
+    <section class="panel" id="panel-dialUp">
+      <div class="section-title">Dial-up</div>
+      <form class="card-form" id="dialUpForm">
+        <div class="field">
+          <label>Job #</label>
+          <select name="jobNumber" required></select>
+        </div>
+        <div class="field">
+          <label>Client Name</label>
+          <input type="text" name="clientNameDisplay" disabled>
+        </div>
+        <div class="field">
+          <label>Amount</label>
+          <input type="text" name="amountDisplay" disabled>
+        </div>
+        <div class="field">
+          <label>Dial-up Date</label>
+          <input type="date" name="dialupDate" required>
+        </div>
+        <button class="primary" type="submit">Confirm Dial-up</button>
+        <div class="msg" id="dialUpMsg"></div>
+      </form>
+    </section>
+
+    <section class="panel" id="panel-topUp">
+      <div class="section-title">Top-up</div>
+      <form class="card-form" id="topUpForm">
+        <div class="field">
+          <label>Top-up Date</label>
+          <input type="date" name="topupDate" required>
+        </div>
+        <div class="field">
+          <label>Client Name</label>
+          <select name="clientName" required></select>
+        </div>
+        <div class="field">
+          <label>Amount</label>
+          <input type="number" step="0.01" min="0" name="amount" required>
+        </div>
+        <div class="field">
+          <label>RA #</label>
+          <input type="text" name="raNumber">
+        </div>
+        <div class="field">
+          <label>Remarks</label>
+          <input type="text" name="remarks" placeholder="if any">
+        </div>
+        <p class="muted">No need to identify branch — this top-up applies to the client's balance across all branches.</p>
+        <button class="primary" type="submit">Record Top-up</button>
+        <div class="msg" id="topUpMsg"></div>
+      </form>
+    </section>
+
+    <? if (isAdminLike) { ?>
+    <section class="panel" id="panel-manageData">
+      <div class="section-title">Manage Data</div>
+      <div class="toolbar">
+        <select id="manageDataType">
+          <option value="client">Client Name</option>
+          <option value="vessel">Vessel Name</option>
+          <option value="port">Port</option>
+        </select>
+        <button class="secondary" id="manageDataAddBtn">Add New</button>
+      </div>
+      <div id="manageDataTable"></div>
+    </section>
+
+    <section class="panel" id="panel-auditLog">
+      <div class="section-title">Audit Log</div>
+      <div id="auditLogTable"></div>
+    </section>
+
+    <section class="panel" id="panel-manageError">
+      <div class="section-title">Manage Error — Void / Cancel</div>
+      <p class="muted">Voiding keeps the record for audit but removes it from balance and forecast totals.</p>
+      <div id="manageErrorTable"></div>
+    </section>
+    <? } ?>
+  </main>
+
+  <div class="footer-version">BPL Integrated Monitoring &middot; <?= moduleName ?> v<?= version ?></div>
+
+  <?!= include('JavaScript'); ?>
+  <script>
+    APP.token = <?!= JSON.stringify(token) ?>;
+    APP.access = <?!= JSON.stringify(access) ?>;
+    APP.init();
+  </script>
+</body>
+</html>
