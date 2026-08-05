@@ -1,12 +1,10 @@
 /**
- * Manage Data: Vessel Name, Client Name (carries the PPA beginning
- * balance), Port (carries the Branch tag). Add / Edit / Delete /
+ * Manage Data: Vessel Name, Client Name, Port. Add / Edit / Delete /
  * Active-Inactive, all Admin-like only (enforced in Code.gs entry points).
  *
- * Ports double as the branch determinant for Section 5's branch-split
- * requirement: Register Job's "Port" dropdown is a specific named port,
- * and each Port master record is tagged POM or LAE. A job's branch is
- * inherited from its selected Port at registration time (JobService.gs).
+ * Port is a plain location field with no branch meaning — a job's Branch
+ * comes from the acting user's own session at registration time
+ * (Code.gs / JobService.gs), not from anything in Manage Data.
  */
 
 function listClients_(activeOnly) {
@@ -30,14 +28,6 @@ function listPorts_(activeOnly) {
   return rows;
 }
 
-function getPortBranch_(portName) {
-  var ports = listPorts_(false);
-  for (var i = 0; i < ports.length; i++) {
-    if (ports[i]['Port'] === portName) return ports[i]['Branch'];
-  }
-  return null;
-}
-
 /** Server entry point (Manage Data screen). type: 'client'|'vessel'|'port'. */
 function manageDataList(type) {
   if (type === 'client') return listClients_(false);
@@ -52,9 +42,6 @@ function manageDataSave(type, record, actorName) {
     : type === 'port' ? CONFIG.SHEETS.PORTS
     : null;
   if (!sheetName) throw new Error('Unknown manage-data type: ' + type);
-  if (type === 'port' && CONFIG.BRANCHES.indexOf(record['Branch']) === -1) {
-    throw new Error('Port branch must be one of: ' + CONFIG.BRANCHES.join(', '));
-  }
 
   var sheet = getCocSpreadsheet_().getSheetByName(sheetName);
   var keyField = type === 'client' ? 'Client Name' : type === 'vessel' ? 'Vessel Name' : 'Port';
@@ -115,21 +102,15 @@ function manageDataSetActive(type, key, active, actorName) {
 /**
  * PPA Balance is tracked per Client only (not per branch): the Top-up
  * form is explicit that "the top-up amount is applicable to any
- * transaction branch," so Beginning Balance + Top-ups - Dial-ups is one
- * shared pool per client regardless of which branch registers/dials a job.
- * Branch-split access only controls which jobs a Staff/Branch Admin can
- * see or act on (Section 5) — it does not split the money itself.
+ * transaction branch," so Top-ups - Dial-ups is one shared pool per
+ * client regardless of which branch registers/dials a job. There is no
+ * separate beginning-balance field — a client's starting PPA Balance is
+ * set at go-live by recording a normal Top-up transaction, so it lands
+ * in the audit trail like every other balance change. Branch-split
+ * access only controls which jobs a Staff/Branch Admin can see or act
+ * on (Section 5) — it does not split the money itself.
  */
 function getClientBalance_(clientName) {
-  var clients = listClients_(false);
-  var beginning = 0;
-  for (var i = 0; i < clients.length; i++) {
-    if (clients[i]['Client Name'] === clientName) {
-      beginning = toNumber_(clients[i]['Beginning Balance']);
-      break;
-    }
-  }
-
   var jobs = listJobs_();
   var dialledTotal = jobs
     .filter(function (j) { return j['Client Name'] === clientName && j['Status'] === CONFIG.STATUS.DIALLED_UP && !j['Void']; })
@@ -140,7 +121,7 @@ function getClientBalance_(clientName) {
     .filter(function (t) { return t['Client Name'] === clientName && !t['Void']; })
     .reduce(function (sum, t) { return sum + toNumber_(t['Amount']); }, 0);
 
-  return beginning + topupTotal - dialledTotal;
+  return topupTotal - dialledTotal;
 }
 
 function getClientForecastTotal_(clientName) {
@@ -149,3 +130,4 @@ function getClientForecastTotal_(clientName) {
     .filter(function (j) { return j['Client Name'] === clientName && j['Status'] === CONFIG.STATUS.FORECAST && !j['Void']; })
     .reduce(function (sum, j) { return sum + toNumber_(j['Amount']); }, 0);
 }
+

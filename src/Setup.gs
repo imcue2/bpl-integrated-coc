@@ -37,7 +37,7 @@ function setupCocDatabase() {
   ]);
 
   ensureSheet_(ss, CONFIG.SHEETS.CLIENTS, [
-    'Client Name', 'Beginning Balance', 'Active', 'Created Date', 'Created By'
+    'Client Name', 'Active', 'Created Date', 'Created By'
   ]);
 
   ensureSheet_(ss, CONFIG.SHEETS.VESSELS, [
@@ -45,7 +45,7 @@ function setupCocDatabase() {
   ]);
 
   ensureSheet_(ss, CONFIG.SHEETS.PORTS, [
-    'Port', 'Branch', 'Active', 'Created Date', 'Created By'
+    'Port', 'Active', 'Created Date', 'Created By'
   ]);
 
   ensureSheet_(ss, CONFIG.SHEETS.AUDIT_LOG, [

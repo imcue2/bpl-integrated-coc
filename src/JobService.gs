@@ -32,16 +32,17 @@ function findJobByNumber_(jobNumber) {
 /**
  * form = { clientName, jobNumber, vesselEta, vesselName, voyageNumber,
  *          port, amount, remarks }
+ *
+ * `branch` is NOT derived from the form — Port is a plain location field
+ * with no branch meaning. It is the acting user's own branch (their
+ * Branch Scope from User Module Access, or Branch Admin Of if they're a
+ * Branch Admin, or 'Both' for a SuperUser), resolved by the caller
+ * (Code.gs api_registerJob) from their session and passed in here.
  */
-function registerJob(form, actorName) {
+function registerJob(form, actorName, branch) {
   var existing = findJobByNumber_(form.jobNumber);
   if (existing && !existing['Void']) {
     throw new Error('Job # "' + form.jobNumber + '" is already registered.');
-  }
-
-  var branch = getPortBranch_(form.port);
-  if (!branch) {
-    throw new Error('Port "' + form.port + '" has no branch assigned. Add it under Manage Data first.');
   }
 
   var record = {

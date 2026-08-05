@@ -66,8 +66,8 @@ var APP = {
       }
       values.forEach(function (v) {
         var opt = document.createElement('option');
-        opt.value = typeof v === 'object' ? v.name : v;
-        opt.textContent = typeof v === 'object' ? v.name + ' (' + v.branch + ')' : v;
+        opt.value = v;
+        opt.textContent = v;
         select.appendChild(opt);
       });
     }
@@ -310,20 +310,17 @@ var APP = {
   renderManageData: function (type, rows) {
     var self = this;
     var keyField = this.keyFieldFor(type);
-    var extraHeader = type === 'client' ? '<th>Beginning Balance</th>' : type === 'port' ? '<th>Branch</th>' : '';
     var body = rows.map(function (r) {
-      var extraCell = type === 'client' ? '<td>' + self.money(r['Beginning Balance']) + '</td>'
-        : type === 'port' ? '<td>' + r['Branch'] + '</td>' : '';
       var active = r['Active'] === true || r['Active'] === 'Y';
-      return '<tr><td>' + r[keyField] + '</td>' + extraCell +
+      return '<tr><td>' + r[keyField] + '</td>' +
         '<td><span class="badge ' + (active ? 'green' : 'status-void') + '">' + (active ? 'Active' : 'Inactive') + '</span></td>' +
         '<td><button class="secondary" data-key="' + r[keyField] + '" data-active="' + active + '">' +
         (active ? 'Deactivate' : 'Activate') + '</button></td></tr>';
     }).join('');
 
     document.getElementById('manageDataTable').innerHTML =
-      '<table class="data-table"><thead><tr><th>' + keyField + '</th>' + extraHeader +
-      '<th>Status</th><th></th></tr></thead><tbody>' + (body || '<tr><td colspan="4" class="muted">No records yet.</td></tr>') + '</tbody></table>';
+      '<table class="data-table"><thead><tr><th>' + keyField + '</th>' +
+      '<th>Status</th><th></th></tr></thead><tbody>' + (body || '<tr><td colspan="3" class="muted">No records yet.</td></tr>') + '</tbody></table>';
 
     document.querySelectorAll('#manageDataTable button[data-key]').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -342,14 +339,6 @@ var APP = {
     if (!name) return;
     var record = {};
     record[keyField] = name;
-    if (type === 'client') {
-      var beginning = prompt('Beginning PPA Balance for "' + name + '":', '0');
-      record['Beginning Balance'] = Number(beginning) || 0;
-    }
-    if (type === 'port') {
-      var branch = prompt('Branch for "' + name + '" (POM or LAE):', 'POM');
-      record['Branch'] = (branch || '').toUpperCase();
-    }
     google.script.run
       .withSuccessHandler(onDone)
       .withFailureHandler(this.showFatalError)

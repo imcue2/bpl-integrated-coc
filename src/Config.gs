@@ -49,9 +49,10 @@ var CONFIG = {
     VOID_CANCEL: 'Void-Cancel'
   },
 
-  // Section 5: COC is branch-split. Branch is carried directly on the Port
-  // master record (see ManageDataService.gs / Ports sheet) — see README for
-  // why Port doubles as the branch determinant.
+  // Section 5: COC is branch-split into these two branches. A job's
+  // Branch is the acting user's own branch scope (see Auth.gs /
+  // Code.gs api_registerJob), never a property of Port or any other
+  // Manage Data record.
   BRANCHES: ['POM', 'LAE'],
 
   // Session token lifetime issued by this module's own fallback login

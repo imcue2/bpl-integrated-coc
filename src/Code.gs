@@ -79,9 +79,7 @@ function api_getBootstrap(token) {
     access: ctx.access,
     clients: listClients_(true).map(function (c) { return c['Client Name']; }),
     vessels: listVessels_(true).map(function (v) { return v['Vessel Name']; }),
-    ports: listPorts_(true)
-      .filter(function (p) { return branchAllowed_(ctx.access, p['Branch']); })
-      .map(function (p) { return { name: p['Port'], branch: p['Branch'] }; })
+    ports: listPorts_(true).map(function (p) { return p['Port']; })
   };
 }
 
@@ -107,11 +105,11 @@ function api_getForecastByJob(token, clientName) {
 function api_registerJob(token, form) {
   var ctx = requireAccess_(token);
   if (!canEdit_(ctx.access)) throw new Error('You do not have permission to register jobs.');
-  var branch = getPortBranch_(form.port);
-  if (branch && !branchAllowed_(ctx.access, branch)) {
-    throw new Error('You do not have access to branch "' + branch + '".');
-  }
-  return registerJob(form, actorName_(ctx.session));
+  // Branch is a property of the acting user, not the Port they picked —
+  // their own resolved branch scope (Branch Scope from User Module
+  // Access, or Branch Admin Of for a Branch Admin, or 'Both' for a
+  // SuperUser) is what gets written onto the job.
+  return registerJob(form, actorName_(ctx.session), ctx.access.branchScope);
 }
 
 function api_dialUp(token, form) {

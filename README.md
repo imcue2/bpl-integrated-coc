@@ -44,20 +44,22 @@ Drive folder alongside the other module databases (Section 1). Then
 hand the exec URL to whoever wires up the shell's header module switcher —
 it should link here with `?token=<session token>` appended.
 
-## Assumptions made (please confirm)
+## Assumptions made (confirmed / corrected)
 
 The module spec doc explicitly asks for loopholes to be surfaced before
 building. These are the judgment calls made to keep moving; each is called
-out in a code comment at its point of use too:
+out in a code comment at its point of use too. #1 and #3 were corrected
+after review — the rest were confirmed as-built.
 
 1. **Branch source (Section 5 vs. Register Job fields).** COC is
    branch-split (POM/LAE/Both) but Register Job only has a `Port` field,
-   no `Branch` field. Implemented as: **Port master records (Manage Data)
-   carry an explicit Branch tag**, and a job inherits its branch from the
-   Port selected at registration (`getPortBranch_` in
-   `ManageDataService.gs`). If Port is actually meant to be identical to
-   Branch (only ever POM/LAE, no other named ports), this still works —
-   you'd just create exactly two Port records.
+   no `Branch` field. **Corrected:** Port is a plain location field with
+   no branch meaning. A job's Branch is the *acting user's own* branch —
+   their Branch Scope from `User Module Access`, or their Branch Admin Of
+   value if they're a Branch Admin, or `'Both'` for a SuperUser — resolved
+   from the session and written onto the job at registration time
+   (`Code.gs api_registerJob`, passed into `registerJob()` in
+   `JobService.gs`). Manage Data → Port carries no branch tag at all.
 
 2. **PPA Balance scope.** The Top-up form's own note ("No need to
    identify to which branch... applicable to any transaction branch")
@@ -67,11 +69,12 @@ out in a code comment at its point of use too:
    math or the red/green cascade, which are always company-wide for that
    client (`getClientBalance_` in `ManageDataService.gs`).
 
-3. **"Manage Data → PPA Balance"** is implemented as a `Beginning
-   Balance` field captured when a Client Name record is created, not a
-   separate 4th master list — this matches the spec's note ("Must enter
-   beginning balance... increases based on Top-up transactions") reading
-   naturally as a per-client field rather than a standalone entity.
+3. **"Manage Data → PPA Balance."** **Corrected:** there is no Beginning
+   Balance field on Client Name at all. A client's starting PPA Balance
+   at go-live is set by recording a normal Top-up transaction, the same
+   as any later top-up, so it lands in the audit trail like every other
+   balance change (`getClientBalance_` in `ManageDataService.gs` sums
+   Top-ups minus Dial-ups only — no separate starting figure).
 
 4. **Manage Error / void mechanism (Section 7)** was built and left on
    for COC (Admin-only void of a Job or Top-up, reason required, keeps
