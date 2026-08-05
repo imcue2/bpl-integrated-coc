@@ -35,7 +35,7 @@ function doGet(e) {
 }
 
 function renderLogin_() {
-  var template = HtmlService.createTemplateFromFile('Login');
+  var template = HtmlService.createTemplateFromFile('LoginPage');
   template.moduleName = CONFIG.MODULE_NAME;
   template.version = CONFIG.VERSION;
   return template.evaluate()
