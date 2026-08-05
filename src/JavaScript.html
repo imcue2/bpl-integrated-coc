@@ -1,0 +1,413 @@
+<script>
+var APP = {
+  token: null,
+  access: null,
+  bootstrap: null,
+
+  init: function () {
+    this.bindTabs();
+    this.bindForms();
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function (data) {
+        self.bootstrap = data;
+        self.populateDropdowns(data);
+        self.loadDashboard();
+        self.loadForecastEta();
+        self.loadForecastJob();
+        if (self.isAdminLike()) {
+          self.loadManageData();
+          self.loadAuditLog();
+          self.loadManageError();
+        }
+      })
+      .withFailureHandler(this.showFatalError)
+      .api_getBootstrap(this.token);
+  },
+
+  isAdminLike: function () {
+    return this.access.role === 'SuperUser' || this.access.role === 'Branch Admin' || this.access.role === 'Admin';
+  },
+
+  showFatalError: function (err) {
+    document.querySelector('main').innerHTML =
+      '<div class="msg error">' + (err && err.message ? err.message : err) + '</div>';
+  },
+
+  bindTabs: function () {
+    var buttons = document.querySelectorAll('#tabs button');
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        buttons.forEach(function (b) { b.classList.remove('active'); });
+        document.querySelectorAll('.panel').forEach(function (p) { p.classList.remove('active'); });
+        btn.classList.add('active');
+        document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+      });
+    });
+  },
+
+  todayStr: function () {
+    var d = new Date();
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + mm + '-' + dd;
+  },
+
+  populateDropdowns: function (data) {
+    var self = this;
+
+    function fillSelect(select, values, placeholder) {
+      select.innerHTML = '';
+      if (placeholder) {
+        var opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = placeholder;
+        select.appendChild(opt);
+      }
+      values.forEach(function (v) {
+        var opt = document.createElement('option');
+        opt.value = typeof v === 'object' ? v.name : v;
+        opt.textContent = typeof v === 'object' ? v.name + ' (' + v.branch + ')' : v;
+        select.appendChild(opt);
+      });
+    }
+
+    document.querySelectorAll('#dashboardClientFilter, #etaClientFilter, #jobClientFilter').forEach(function (sel) {
+      fillSelect(sel, data.clients, 'All Clients');
+    });
+    fillSelect(document.querySelector('#registerJobForm select[name="clientName"]'), data.clients);
+    fillSelect(document.querySelector('#topUpForm select[name="clientName"]'), data.clients);
+    fillSelect(document.querySelector('#registerJobForm select[name="vesselName"]'), data.vessels);
+    fillSelect(document.querySelector('#registerJobForm select[name="port"]'), data.ports);
+
+    document.getElementById('topUpForm').topupDate.value = self.todayStr();
+
+    document.getElementById('dashboardClientFilter').addEventListener('change', function () {
+      self.loadDashboard(this.value);
+    });
+    document.getElementById('etaClientFilter').addEventListener('change', function () {
+      self.loadForecastEta(this.value);
+    });
+    document.getElementById('jobClientFilter').addEventListener('change', function () {
+      self.loadForecastJob(this.value);
+    });
+
+    self.loadForecastJobsIntoDialUp();
+  },
+
+  money: function (n) {
+    var num = Number(n) || 0;
+    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  // ---- Dashboard ----
+  loadDashboard: function (clientName) {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function (data) { self.renderDashboard(data); })
+      .withFailureHandler(this.showFatalError)
+      .api_getDashboard(this.token, clientName || '');
+  },
+
+  renderDashboard: function (data) {
+    if (data.clientName) document.getElementById('dashboardClientFilter').value = data.clientName;
+
+    var balCard = data.balanceCard;
+    var cardsHtml = '';
+    cardsHtml += '<div class="card"><h3>PPA Balance vs Forecasted Amount</h3>' +
+      '<div class="big ' + (balCard.isLow ? 'red' : 'green') + '">' + this.money(balCard.ppaBalance) + '</div>' +
+      '<div class="muted">Forecasted (status: Forecast): ' + this.money(balCard.forecastTotal) + '</div></div>';
+
+    cardsHtml += '<div class="card"><h3>Request Amount</h3>';
+    if (data.requestAmountCard.length) {
+      cardsHtml += '<ul>' + data.requestAmountCard.map(function (r) {
+        return '<li>' + r.label + '</li>';
+      }).join('') + '</ul>';
+    } else {
+      cardsHtml += '<div class="empty">No forecasted jobs.</div>';
+    }
+    cardsHtml += '</div>';
+
+    cardsHtml += '<div class="card"><h3>Recent Top-up</h3>';
+    if (data.recentTopUpCard.length) {
+      cardsHtml += '<ul>' + data.recentTopUpCard.map(function (t) {
+        return '<li>' + t.label + '</li>';
+      }).join('') + '</ul>';
+    } else {
+      cardsHtml += '<div class="empty">No top-ups recorded.</div>';
+    }
+    cardsHtml += '</div>';
+
+    document.getElementById('dashboardCards').innerHTML = cardsHtml;
+    document.getElementById('dashboardEtaTable').innerHTML = this.renderEtaTable(data.forecastByEta);
+  },
+
+  // ---- Forecast by ETA ----
+  loadForecastEta: function (clientName) {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        document.getElementById('forecastEtaTable').innerHTML = self.renderEtaTable(rows);
+      })
+      .withFailureHandler(this.showFatalError)
+      .api_getForecastByEta(this.token, clientName || '');
+  },
+
+  renderEtaTable: function (rows) {
+    if (!rows.length) return '<p class="muted">No forecasted jobs.</p>';
+    var maxPorts = rows.reduce(function (m, r) { return Math.max(m, r.ports.length); }, 1);
+    var portHeaders = [];
+    for (var i = 0; i < maxPorts; i++) portHeaders.push('<th>Port' + (maxPorts > 1 ? ' ' + (i + 1) : '') + '</th>');
+
+    var body = rows.map(function (r) {
+      var portCells = [];
+      for (var i = 0; i < maxPorts; i++) portCells.push('<td>' + (r.ports[i] || '') + '</td>');
+      return '<tr><td>' + APP.formatDate(r.vesselEta) + '</td>' + portCells.join('') +
+        '<td class="amount-cell ' + r.color + '">' + APP.money(r.amount) +
+        ' <span class="badge ' + r.color + '">' + (r.color === 'green' ? 'Sufficient' : 'Insufficient') + '</span></td></tr>';
+    }).join('');
+
+    return '<table class="data-table"><thead><tr><th>Vessel ETA</th>' + portHeaders.join('') +
+      '<th>Amount</th></tr></thead><tbody>' + body + '</tbody></table>';
+  },
+
+  formatDate: function (v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  },
+
+  // ---- Forecast by Job ----
+  loadForecastJob: function (clientName) {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        document.getElementById('forecastJobTable').innerHTML = self.renderJobTable(rows);
+      })
+      .withFailureHandler(this.showFatalError)
+      .api_getForecastByJob(this.token, clientName || '');
+  },
+
+  renderJobTable: function (rows) {
+    if (!rows.length) return '<p class="muted">No forecasted jobs.</p>';
+    var body = rows.map(function (r) {
+      return '<tr><td>' + APP.formatDate(r.vesselEta) + '</td><td>' + r.vesselName + '</td><td>' + r.port +
+        '</td><td class="amount-cell ' + r.color + '">' + APP.money(r.amount) +
+        ' <span class="badge ' + r.color + '">' + (r.color === 'green' ? 'Sufficient' : 'Insufficient') + '</span></td></tr>';
+    }).join('');
+    return '<table class="data-table"><thead><tr><th>Vessel ETA</th><th>Vessel Name</th><th>Port</th><th>Amount</th></tr></thead><tbody>' + body + '</tbody></table>';
+  },
+
+  // ---- Forms ----
+  bindForms: function () {
+    var self = this;
+    document.getElementById('registerJobForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var f = e.target;
+      var form = {
+        clientName: f.clientName.value, jobNumber: f.jobNumber.value, vesselEta: f.vesselEta.value,
+        vesselName: f.vesselName.value, voyageNumber: f.voyageNumber.value, port: f.port.value,
+        amount: f.amount.value, remarks: f.remarks.value
+      };
+      var msg = document.getElementById('registerJobMsg');
+      msg.textContent = ''; msg.className = 'msg';
+      google.script.run
+        .withSuccessHandler(function () {
+          msg.textContent = 'Job registered — status set to Forecast.'; msg.className = 'msg success';
+          f.reset();
+          self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); self.loadForecastJobsIntoDialUp();
+        })
+        .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
+        .api_registerJob(self.token, form);
+    });
+
+    document.getElementById('dialUpForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var f = e.target;
+      var form = { jobNumber: f.jobNumber.value, dialupDate: f.dialupDate.value };
+      var msg = document.getElementById('dialUpMsg');
+      msg.textContent = ''; msg.className = 'msg';
+      google.script.run
+        .withSuccessHandler(function () {
+          msg.textContent = 'Dial-up confirmed — status set to Dialled-up.'; msg.className = 'msg success';
+          f.reset(); f.dialupDate.value = self.todayStr();
+          self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); self.loadForecastJobsIntoDialUp();
+        })
+        .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
+        .api_dialUp(self.token, form);
+    });
+
+    document.getElementById('topUpForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var f = e.target;
+      var form = {
+        topupDate: f.topupDate.value, clientName: f.clientName.value, amount: f.amount.value,
+        raNumber: f.raNumber.value, remarks: f.remarks.value
+      };
+      var msg = document.getElementById('topUpMsg');
+      msg.textContent = ''; msg.className = 'msg';
+      google.script.run
+        .withSuccessHandler(function () {
+          msg.textContent = 'Top-up recorded.'; msg.className = 'msg success';
+          f.reset(); f.topupDate.value = self.todayStr();
+          self.loadDashboard();
+        })
+        .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
+        .api_topUp(self.token, form);
+    });
+
+    document.getElementById('dialUpForm').jobNumber.value = '';
+  },
+
+  loadForecastJobsIntoDialUp: function () {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        var select = document.querySelector('#dialUpForm select[name="jobNumber"]');
+        select.innerHTML = '<option value="">Select a Forecast job</option>';
+        rows.forEach(function (r) {
+          var opt = document.createElement('option');
+          opt.value = r.jobNumber;
+          opt.textContent = r.jobNumber + ' — ' + APP.money(r.amount);
+          opt.dataset.client = r.clientName || '';
+          opt.dataset.amount = r.amount;
+          select.appendChild(opt);
+        });
+        select.onchange = function () {
+          var opt = select.options[select.selectedIndex];
+          var f = document.getElementById('dialUpForm');
+          f.clientNameDisplay.value = opt.dataset.client || '';
+          f.amountDisplay.value = opt.dataset.amount ? APP.money(opt.dataset.amount) : '';
+        };
+      })
+      .withFailureHandler(this.showFatalError)
+      .api_getForecastByJob(this.token, '');
+    document.getElementById('dialUpForm').dialupDate.value = this.todayStr();
+  },
+
+  // ---- Manage Data ----
+  loadManageData: function () {
+    var self = this;
+    var typeSelect = document.getElementById('manageDataType');
+    function render() {
+      google.script.run
+        .withSuccessHandler(function (rows) { self.renderManageData(typeSelect.value, rows); })
+        .withFailureHandler(self.showFatalError)
+        .api_manageDataList(self.token, typeSelect.value);
+    }
+    typeSelect.addEventListener('change', render);
+    document.getElementById('manageDataAddBtn').addEventListener('click', function () {
+      self.promptManageDataAdd(typeSelect.value, render);
+    });
+    render();
+  },
+
+  keyFieldFor: function (type) {
+    return type === 'client' ? 'Client Name' : type === 'vessel' ? 'Vessel Name' : 'Port';
+  },
+
+  renderManageData: function (type, rows) {
+    var self = this;
+    var keyField = this.keyFieldFor(type);
+    var extraHeader = type === 'client' ? '<th>Beginning Balance</th>' : type === 'port' ? '<th>Branch</th>' : '';
+    var body = rows.map(function (r) {
+      var extraCell = type === 'client' ? '<td>' + self.money(r['Beginning Balance']) + '</td>'
+        : type === 'port' ? '<td>' + r['Branch'] + '</td>' : '';
+      var active = r['Active'] === true || r['Active'] === 'Y';
+      return '<tr><td>' + r[keyField] + '</td>' + extraCell +
+        '<td><span class="badge ' + (active ? 'green' : 'status-void') + '">' + (active ? 'Active' : 'Inactive') + '</span></td>' +
+        '<td><button class="secondary" data-key="' + r[keyField] + '" data-active="' + active + '">' +
+        (active ? 'Deactivate' : 'Activate') + '</button></td></tr>';
+    }).join('');
+
+    document.getElementById('manageDataTable').innerHTML =
+      '<table class="data-table"><thead><tr><th>' + keyField + '</th>' + extraHeader +
+      '<th>Status</th><th></th></tr></thead><tbody>' + (body || '<tr><td colspan="4" class="muted">No records yet.</td></tr>') + '</tbody></table>';
+
+    document.querySelectorAll('#manageDataTable button[data-key]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var nowActive = btn.dataset.active === 'true';
+        google.script.run
+          .withSuccessHandler(function () { self.loadManageData(); })
+          .withFailureHandler(self.showFatalError)
+          .api_manageDataSetActive(self.token, type, btn.dataset.key, !nowActive);
+      });
+    });
+  },
+
+  promptManageDataAdd: function (type, onDone) {
+    var keyField = this.keyFieldFor(type);
+    var name = prompt('New ' + keyField + ':');
+    if (!name) return;
+    var record = {};
+    record[keyField] = name;
+    if (type === 'client') {
+      var beginning = prompt('Beginning PPA Balance for "' + name + '":', '0');
+      record['Beginning Balance'] = Number(beginning) || 0;
+    }
+    if (type === 'port') {
+      var branch = prompt('Branch for "' + name + '" (POM or LAE):', 'POM');
+      record['Branch'] = (branch || '').toUpperCase();
+    }
+    google.script.run
+      .withSuccessHandler(onDone)
+      .withFailureHandler(this.showFatalError)
+      .api_manageDataSave(this.token, type, record);
+  },
+
+  // ---- Audit Log ----
+  loadAuditLog: function () {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        var body = rows.map(function (r) {
+          return '<tr><td>' + self.formatDate(r.timestamp) + '</td><td>' + r.user + '</td><td>' + (r.branch || '') +
+            '</td><td>' + r.recordRef + '</td><td>' + r.action + '</td><td>' + (r.fieldChanged || '') +
+            '</td><td>' + (r.oldValue || '') + ' → ' + (r.newValue || '') + '</td></tr>';
+        }).join('');
+        document.getElementById('auditLogTable').innerHTML =
+          '<table class="data-table"><thead><tr><th>Timestamp</th><th>User</th><th>Branch</th><th>Record Ref#</th><th>Action</th><th>Field</th><th>Change</th></tr></thead><tbody>' +
+          (body || '<tr><td colspan="7" class="muted">No entries yet.</td></tr>') + '</tbody></table>';
+      })
+      .withFailureHandler(this.showFatalError)
+      .api_getAuditLog(this.token, {});
+  },
+
+  // ---- Manage Error ----
+  loadManageError: function () {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        var body = rows.map(function (r) {
+          return '<tr><td>' + r.type + '</td><td>' + r.ref + '</td><td>' + r.client + '</td><td>' + r.status +
+            '</td><td>' + self.money(r.amount) + '</td><td>' + self.formatDate(r.date) +
+            '</td><td><button class="secondary" data-type="' + r.type + '" data-ref="' + r.ref + '">Void</button></td></tr>';
+        }).join('');
+        document.getElementById('manageErrorTable').innerHTML =
+          '<table class="data-table"><thead><tr><th>Type</th><th>Ref#</th><th>Client</th><th>Status</th><th>Amount</th><th>Date</th><th></th></tr></thead><tbody>' +
+          (body || '<tr><td colspan="7" class="muted">Nothing to void.</td></tr>') + '</tbody></table>';
+
+        document.querySelectorAll('#manageErrorTable button[data-ref]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var reason = prompt('Reason for voiding ' + btn.dataset.ref + ':');
+            if (!reason) return;
+            if (btn.dataset.type === 'job') {
+              google.script.run
+                .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); })
+                .withFailureHandler(self.showFatalError)
+                .api_voidJob(self.token, btn.dataset.ref, reason);
+            } else {
+              google.script.run
+                .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); })
+                .withFailureHandler(self.showFatalError)
+                .api_voidTopUp(self.token, btn.dataset.ref, reason);
+            }
+          });
+        });
+      })
+      .withFailureHandler(this.showFatalError)
+      .api_listVoidableRecords(this.token);
+  }
+};
+</script>
