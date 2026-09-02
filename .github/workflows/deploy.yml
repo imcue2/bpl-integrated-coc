@@ -1,0 +1,62 @@
+name: Deploy to Apps Script
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-apps-script
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # scriptId is not sensitive on its own (no access without the OAuth
+  # credentials below) so it's fine to keep here rather than in a secret.
+  CLASP_SCRIPT_ID: "1ypm58Atei552X4p8kzIXD6vfsHSjjjPA3aPm3Autr_X7j06wL8_ReoGa"
+  # The deployment ID behind the live "Web app" URL — updating it in place
+  # keeps the published URL stable instead of minting a new deployment.
+  CLASP_DEPLOYMENT_ID: "AKfycbzgMRoD5XUoHLxUj889d6eWCefC9cbFXUbr1OxoQZMpGeXZ289MDjcz_C1Mci1xzpfegg"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Restore clasp login
+        env:
+          CLASPRC: ${{ secrets.CLASP_CREDENTIALS }}
+        run: printf '%s' "$CLASPRC" > "$HOME/.clasprc.json"
+
+      - name: Write .clasp.json
+        run: |
+          cat > .clasp.json <<EOF
+          {
+            "scriptId": "${CLASP_SCRIPT_ID}",
+            "rootDir": "./src",
+            "scriptExtensions": [".js", ".gs"],
+            "htmlExtensions": [".html"],
+            "jsonExtensions": [".json"],
+            "filePushOrder": [],
+            "skipSubdirectories": false
+          }
+          EOF
+
+      - name: Push code
+        run: clasp push -f
+
+      - name: Update live deployment
+        run: clasp deploy -i "$CLASP_DEPLOYMENT_ID" -d "Auto-deploy ${{ github.sha }}"
