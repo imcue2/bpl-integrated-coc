@@ -100,6 +100,16 @@ var APP = {
     return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   },
 
+  // Re-reads each tab's own filter dropdown so a refresh after an action
+  // stays on the client the user actually has selected, instead of
+  // silently falling back to "first client in the list".
+  refreshAllViews: function () {
+    this.loadDashboard(document.getElementById('dashboardClientFilter').value);
+    this.loadForecastEta(document.getElementById('etaClientFilter').value);
+    this.loadForecastJob(document.getElementById('jobClientFilter').value);
+    this.loadForecastJobsIntoDialUp();
+  },
+
   // ---- Dashboard ----
   loadDashboard: function (clientName) {
     var self = this;
@@ -216,7 +226,7 @@ var APP = {
         .withSuccessHandler(function () {
           msg.textContent = 'Job registered — status set to Forecast.'; msg.className = 'msg success';
           f.reset();
-          self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); self.loadForecastJobsIntoDialUp();
+          self.refreshAllViews();
         })
         .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
         .api_registerJob(self.token, form);
@@ -232,7 +242,7 @@ var APP = {
         .withSuccessHandler(function () {
           msg.textContent = 'Dial-up confirmed — status set to Dialled-up.'; msg.className = 'msg success';
           f.reset(); f.dialupDate.value = self.todayStr();
-          self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); self.loadForecastJobsIntoDialUp();
+          self.refreshAllViews();
         })
         .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
         .api_dialUp(self.token, form);
@@ -251,7 +261,10 @@ var APP = {
         .withSuccessHandler(function () {
           msg.textContent = 'Top-up recorded.'; msg.className = 'msg success';
           f.reset(); f.topupDate.value = self.todayStr();
-          self.loadDashboard();
+          // A top-up changes the client's PPA Balance, which feeds the
+          // red/green cascade on both Forecast tables too, not just the
+          // Dashboard preview — refresh everything, not just the balance card.
+          self.refreshAllViews();
         })
         .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
         .api_topUp(self.token, form);
@@ -383,12 +396,12 @@ var APP = {
             if (!reason) return;
             if (btn.dataset.type === 'job') {
               google.script.run
-                .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); })
+                .withSuccessHandler(function () { self.loadManageError(); self.refreshAllViews(); })
                 .withFailureHandler(self.showFatalError)
                 .api_voidJob(self.token, btn.dataset.ref, reason);
             } else {
               google.script.run
-                .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); })
+                .withSuccessHandler(function () { self.loadManageError(); self.refreshAllViews(); })
                 .withFailureHandler(self.showFatalError)
                 .api_voidTopUp(self.token, btn.dataset.ref, reason);
             }
