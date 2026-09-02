@@ -72,6 +72,94 @@ function CONFIG_TIMEZONE_() {
   return Session.getScriptTimeZone() || 'Pacific/Port_Moresby';
 }
 
+/**
+ * Converts a raw sheet cell value to a plain "yyyy-MM-dd" string, or '' if
+ * empty/invalid. Google Sheets silently auto-converts date-looking values
+ * (e.g. anything written from an HTML date input) into real Date objects —
+ * and a raw Date object anywhere in a returned structure has been observed
+ * to silently kill the whole google.script.run response (delivered as null
+ * to the success handler, no error) through this app's sandboxed-iframe
+ * bridge. Every date-ish field must be run through this before being
+ * returned from any api_* endpoint.
+ */
+function toIsoDateStr_(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  var d = (v instanceof Date) ? v : new Date(v);
+  if (isNaN(d.getTime())) return String(v);
+  return Utilities.formatDate(d, CONFIG_TIMEZONE_(), 'yyyy-MM-dd');
+}
+
+/** Same as toIsoDateStr_ but keeps the time component (for timestamps like AuditLog's Timestamp column). */
+function toIsoTimestampStr_(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  var d = (v instanceof Date) ? v : new Date(v);
+  if (isNaN(d.getTime())) return String(v);
+  return d.toISOString();
+}
+
+/**
+ * Defensive catch-all for any cell value about to leave the server via
+ * google.script.run: if it's a raw Date (Sheets auto-converts date-
+ * looking values, so this can show up in columns that aren't nominally
+ * "dates" at all — e.g. AuditLog's freeform Old Value/New Value), convert
+ * it to a plain date string instead of returning it as-is. A raw Date
+ * object anywhere in a response silently breaks the whole response (see
+ * toIsoDateStr_ for the full story) — this is the last line of defense
+ * for columns too generic to have a dedicated date field to fix at the
+ * source.
+ */
+function safeCellStr_(v) {
+  if (v instanceof Date) return toIsoDateStr_(v);
+  return v == null ? '' : v;
+}
+
+/**
+ * Composes the displayed Remarks column: "{Lane} / {Category} - {remarks
+ * text}", omitting whichever of Lane/Category is blank, and omitting the
+ * " - " separator entirely if there's no free-text remarks. E.g.
+ * "Red Lane / CEF - subject for inspection", or just "Green Lane" if no
+ * remarks text was entered, or just the remarks text if no lane/category
+ * was ever set.
+ */
+function formatRemarksDisplay_(job) {
+  var parts = [];
+  if (job['Assessment Lane']) parts.push(job['Assessment Lane']);
+  if (job['Assessment Category']) parts.push(job['Assessment Category']);
+  var prefix = parts.join(' / ');
+  var remarks = job['Remarks'] || '';
+  if (prefix && remarks) return prefix + ' - ' + remarks;
+  return prefix || remarks;
+}
+
+/**
+ * Each Lane constrains which Category values (if any) are valid —
+ * Red Lane: CEF or Physical Inspection only (blank not allowed).
+ * Yellow Lane: blank or CEPA only.
+ * Green Lane (or no Lane selected): blank only.
+ * Throws a user-facing error; called from JobService.gs updateJob_
+ * (server never trusts the client's own dropdown restrictions).
+ */
+function validateAssessmentType_(lane, category) {
+  var rules = CONFIG.ASSESSMENT_LANE_CATEGORY_RULES[lane] || { allowed: [], blankAllowed: true };
+  if (!category) {
+    if (!rules.blankAllowed) {
+      throw new Error('Assessment Category is required when Assessment Lane is ' + lane + ' (' + rules.allowed.join(' or ') + ').');
+    }
+    return;
+  }
+  if (rules.allowed.indexOf(category) === -1) {
+    var allowedDesc = rules.allowed.length ? rules.allowed.join(' or ') : 'blank';
+    throw new Error('Assessment Category "' + category + '" is not valid for ' + (lane || 'no Assessment Lane') + ' — must be ' + allowedDesc + '.');
+  }
+}
+
+/** Case-insensitive substring match of `needle` against job['I Number'] — blank needle always matches (no filter applied). */
+function matchesINumber_(job, needle) {
+  if (!needle) return true;
+  if (!job['I Number']) return false;
+  return String(job['I Number']).toLowerCase().indexOf(String(needle).toLowerCase()) !== -1;
+}
+
 /** ETA less 2 days, formatted — used for the Dashboard "Request Amount" card. */
 function requestByDate_(eta) {
   var date = (eta instanceof Date) ? new Date(eta.getTime()) : new Date(eta);

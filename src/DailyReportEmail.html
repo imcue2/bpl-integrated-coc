@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<body style="margin:0; padding:0; background:#f5f6f8; font-family:Arial,Helvetica,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8; padding:24px 0;">
+<tr><td align="center">
+<table role="presentation" width="700" cellpadding="0" cellspacing="0" style="background:#ffffff; border:1px solid #d7dbe0;">
+
+  <tr>
+    <td style="background:#14202E; padding:16px 24px;">
+      <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+        <td><img src="cid:logo" alt="Blue Planet Logistics" height="40" style="display:block;"></td>
+        <td style="padding-left:12px; color:#ffffff; font-family:Arial,Helvetica,sans-serif;">
+          <div style="font-size:16px; font-weight:bold;">BLUE PLANET LOGISTICS</div>
+          <div style="font-size:12px; opacity:0.85;">COC Prefunding Forecast &mdash; Daily Update</div>
+        </td>
+      </tr></table>
+    </td>
+  </tr>
+
+  <tr><td style="padding:20px 24px 4px;">
+    <div style="font-size:18px; font-weight:bold; color:#16202C;"><?= clientName ?></div>
+    <div style="font-size:13px; color:#5f6b7a; margin-bottom:16px;"><?= reportDate ?></div>
+  </td></tr>
+
+  <tr><td style="padding:0 24px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td width="33%" valign="top" style="padding:0 6px 0 0;">
+        <table role="presentation" width="100%" cellpadding="10" cellspacing="0" style="border:1px solid #d7dbe0;"><tr><td>
+          <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.05em; color:#087fb4;">PPA Balance vs Forecasted Amount</div>
+          <div style="font-size:22px; font-weight:bold; <?= balanceColorStyle ?>"><?= balanceText ?></div>
+          <div style="font-size:11px; color:#5f6b7a;">Forecast total: <?= forecastTotalText ?></div>
+        </td></tr></table>
+      </td>
+      <td width="33%" valign="top" style="padding:0 6px;">
+        <table role="presentation" width="100%" cellpadding="10" cellspacing="0" style="border:1px solid #d7dbe0;"><tr><td>
+          <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.05em; color:#087fb4;">Request Amount &mdash; next 3 forecast rows</div>
+          <?!= requestAmountHtml ?>
+        </td></tr></table>
+      </td>
+      <td width="33%" valign="top" style="padding:0 0 0 6px;">
+        <table role="presentation" width="100%" cellpadding="10" cellspacing="0" style="border:1px solid #d7dbe0;"><tr><td>
+          <div style="font-size:10px; text-transform:uppercase; letter-spacing:0.05em; color:#087fb4;">Recent Top-up</div>
+          <?!= recentTopUpHtml ?>
+        </td></tr></table>
+      </td>
+    </tr></table>
+  </td></tr>
+
+  <tr><td style="padding:24px 24px 8px;">
+    <div style="font-size:15px; font-weight:bold; color:#16202C; border-bottom:2px solid #14202E; padding-bottom:6px;">Forecast by ETA</div>
+  </td></tr>
+  <tr><td style="padding:0 24px;"><?!= forecastByEtaTableHtml ?></td></tr>
+
+  <tr><td style="padding:24px 24px 8px;">
+    <div style="font-size:15px; font-weight:bold; color:#16202C; border-bottom:2px solid #14202E; padding-bottom:6px;">Forecast by Job</div>
+  </td></tr>
+  <tr><td style="padding:0 24px 24px;"><?!= forecastByJobTableHtml ?></td></tr>
+
+  <tr><td style="padding:16px 24px; background:#f5f6f8; font-size:11px; color:#5f6b7a; border-top:1px solid #d7dbe0;">
+    BPL Integrated Monitoring &middot; COC Prefunding Forecast &mdash; automated daily digest. A full report is attached as PDF.
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>

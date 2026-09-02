@@ -27,6 +27,7 @@ function doGet(e) {
   template.moduleCode = CONFIG.MODULE_CODE;
   template.moduleName = CONFIG.MODULE_NAME;
   template.version = CONFIG.VERSION;
+  template.hubUrl = CONFIG.HUB_URL;
 
   return template.evaluate()
     .setTitle(CONFIG.MODULE_NAME)
@@ -57,6 +58,12 @@ function requireAccess_(token) {
   return { session: session, access: access };
 }
 
+/** Logs out everywhere (shell + every module), since it deletes the shared session row. No access check — logout must always succeed. */
+function api_logout(token) {
+  invalidateSession_(token);
+  return { status: 'OK', hubUrl: CONFIG.HUB_URL };
+}
+
 function actorName_(session) {
   return (session.payload && session.payload.fullName) || session.userId;
 }
@@ -79,7 +86,13 @@ function api_getBootstrap(token) {
     access: ctx.access,
     clients: listClients_(true).map(function (c) { return c['Client Name']; }),
     vessels: listVessels_(true).map(function (v) { return v['Vessel Name']; }),
-    ports: listPorts_(true).map(function (p) { return p['Port']; })
+    ports: listPorts_(true).map(function (p) { return p['Port']; }),
+    shipmentTypes: CONFIG.SHIPMENT_TYPES,
+    kpiYears: listKpiYears_(),
+    kpiRegisteredByUsers: listKpiRegisteredByUsers_(),
+    assessmentLanes: CONFIG.ASSESSMENT_LANES,
+    assessmentCategories: CONFIG.ASSESSMENT_CATEGORIES,
+    assessmentLaneCategoryRules: CONFIG.ASSESSMENT_LANE_CATEGORY_RULES
   };
 }
 
@@ -90,14 +103,40 @@ function api_getDashboard(token, clientName) {
   return getDashboardData(clientName, ctx.access);
 }
 
-function api_getForecastByEta(token, clientName) {
+function api_getForecastByEta(token, clientName, iNumber) {
   var ctx = requireAccess_(token);
-  return getForecastByEta_(clientName, branchFilterFor_(ctx.access));
+  return getForecastByEta_(clientName, branchFilterFor_(ctx.access), iNumber);
 }
 
-function api_getForecastByJob(token, clientName) {
+function api_getForecastByJob(token, clientName, iNumber, status) {
   var ctx = requireAccess_(token);
-  return getForecastByJob_(clientName, branchFilterFor_(ctx.access));
+  return getForecastByJob_(clientName, branchFilterFor_(ctx.access), iNumber, status);
+}
+
+function api_getAllJobs(token, clientName, etaFrom, etaTo, iNumber, status) {
+  var ctx = requireAccess_(token);
+  return listAllJobs_(clientName, branchFilterFor_(ctx.access), etaFrom, etaTo, iNumber, status);
+}
+
+function api_getKpi(token, year, month, clientName, registeredBy) {
+  var ctx = requireAccess_(token);
+  return getKpiData_(year, month, clientName, branchFilterFor_(ctx.access), registeredBy);
+}
+
+function api_getVesselEtaGroups(token) {
+  var ctx = requireAccess_(token);
+  return getVesselEtaGroups_(branchFilterFor_(ctx.access));
+}
+
+function api_getJobUpdateCandidates(token) {
+  var ctx = requireAccess_(token);
+  return listJobUpdateCandidates_(ctx.access, actorName_(ctx.session), branchFilterFor_(ctx.access));
+}
+
+function api_getDialUpCandidates(token) {
+  var ctx = requireAccess_(token);
+  if (!isAdminLike_(ctx.access)) throw new Error('Only Admin and above may process Dial-up.');
+  return listDialUpCandidates_(branchFilterFor_(ctx.access));
 }
 
 // ---- Forms ----
@@ -112,9 +151,10 @@ function api_registerJob(token, form) {
   return registerJob(form, actorName_(ctx.session), ctx.access.branchScope);
 }
 
+/** Dial-up and Top-up are Admin/SuperUser only — confirmed, brokers (Admin role) are the only ones who process these. */
 function api_dialUp(token, form) {
   var ctx = requireAccess_(token);
-  if (!canEdit_(ctx.access)) throw new Error('You do not have permission to dial-up jobs.');
+  if (!isAdminLike_(ctx.access)) throw new Error('Only Admin and above may process Dial-up.');
   var job = findJobByNumber_(form.jobNumber);
   if (job && !branchAllowed_(ctx.access, job['Branch'])) {
     throw new Error('You do not have access to branch "' + job['Branch'] + '".');
@@ -124,8 +164,36 @@ function api_dialUp(token, form) {
 
 function api_topUp(token, form) {
   var ctx = requireAccess_(token);
-  if (!canEdit_(ctx.access)) throw new Error('You do not have permission to record top-ups.');
+  if (!isAdminLike_(ctx.access)) throw new Error('Only Admin and above may process Top-up.');
   return topUpClient(form, actorName_(ctx.session));
+}
+
+/**
+ * Job Update tab — only the person who registered a job, or an
+ * Admin/Branch Admin/SuperUser, may update it. Staff are restricted to
+ * jobs they themselves registered; View can't reach this endpoint at all
+ * (blocked by canEdit_ below); Admin-like roles may update any non-void,
+ * non-Completed job in their branch scope.
+ */
+function api_updateJob(token, form) {
+  var ctx = requireAccess_(token);
+  if (!canEdit_(ctx.access)) throw new Error('You do not have permission to update jobs.');
+  var job = findJobByNumber_(form.jobNumber);
+  if (!job) throw new Error('Job # "' + form.jobNumber + '" not found.');
+  if (!branchAllowed_(ctx.access, job['Branch'])) {
+    throw new Error('You do not have access to branch "' + job['Branch'] + '".');
+  }
+  if (ctx.access.role === 'Staff' && job['Registered By'] !== actorName_(ctx.session)) {
+    throw new Error('You may only update jobs you registered yourself.');
+  }
+  return updateJob_(form, actorName_(ctx.session));
+}
+
+/** Update Vessel ETA tab — bulk-apply a new ETA to every eligible job sharing (vesselName, port). */
+function api_updateVesselEta(token, vesselName, port, newEta) {
+  var ctx = requireAccess_(token);
+  if (!canEdit_(ctx.access)) throw new Error('You do not have permission to update vessel ETAs.');
+  return updateVesselEtaBulk_(vesselName, port, newEta, actorName_(ctx.session));
 }
 
 // ---- Manage Data (Admin-like only) ----

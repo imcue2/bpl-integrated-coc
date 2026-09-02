@@ -32,15 +32,15 @@ function getAuditLog_(filters) {
   }
   return rows.map(function (r) {
     return {
-      timestamp: r['Timestamp'],
+      timestamp: toIsoTimestampStr_(r['Timestamp']),
       user: r['User'],
       branch: r['Branch'],
       module: r['Module'],
       recordRef: r['Record Ref#'],
       action: r['Action'],
       fieldChanged: r['Field Changed'],
-      oldValue: r['Old Value'],
-      newValue: r['New Value']
+      oldValue: safeCellStr_(r['Old Value']),
+      newValue: safeCellStr_(r['New Value'])
     };
   });
 }

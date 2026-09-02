@@ -64,6 +64,30 @@ function validateToken_(token) {
 }
 
 /**
+ * Deletes `token`'s row from the central Sessions sheet — a real logout,
+ * not just dropping the token client-side, since the shell and every
+ * other module read the same Sessions sheet. Silently no-ops if the
+ * token isn't found (already expired/logged out elsewhere).
+ */
+function invalidateSession_(token) {
+  if (!token) return;
+  var sheet = getUsersSpreadsheet_().getSheetByName(CONFIG.USERS_SHEETS.SESSIONS);
+  if (!sheet) return;
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return;
+  var tokenCol = data[0].indexOf('Token');
+  if (tokenCol === -1) return;
+
+  for (var r = 1; r < data.length; r++) {
+    if (data[r][tokenCol] === token) {
+      sheet.deleteRow(r + 1);
+      return;
+    }
+  }
+}
+
+/**
  * Section 4.3 access resolution order, applied for MODULE_CODE = 'COC':
  *   1. Is SuperUser = Y -> full access to everything, stop.
  *   2. Else, Branch Admin Of matches (COC is branch-split) -> full access

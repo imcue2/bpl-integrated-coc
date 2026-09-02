@@ -4,18 +4,18 @@
   <base target="_top">
   <?!= include('Stylesheet'); ?>
   <style>
-    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--navy); }
-    .login-box { background: #fff; border-radius: 10px; padding: 2rem; width: 320px; }
-    .login-box h1 { font-size: 1.1rem; margin: 0 0 0.25rem; }
-    .login-box p.sub { color: var(--muted); font-size: 0.82rem; margin: 0 0 1.25rem; }
+    body { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: var(--neutral-900); }
+    .login-box { background: var(--color-bg); border: 1px solid var(--color-divider); padding: 2rem; width: 320px; position: relative; }
+    .login-box h1 { font-family: var(--font-heading); font-size: 1.3rem; margin: 0 0 0.25rem; }
+    .login-box p.sub { color: var(--neutral-700); font-size: 0.82rem; margin: 0 0 1.25rem; }
     .pw-wrap { position: relative; }
     .pw-wrap input { width: 100%; padding-right: 2.2rem; }
-    .pw-toggle { position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); font-size: 0.75rem; cursor: pointer; color: var(--muted); user-select: none; }
-    button.primary { width: 100%; margin-top: 0.5rem; }
+    .pw-toggle { position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); font-size: 0.75rem; cursor: pointer; color: var(--neutral-700); user-select: none; }
   </style>
 </head>
 <body>
-  <div class="login-box">
+  <div class="login-box blueprint">
+    <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
     <h1><?= moduleName ?></h1>
     <p class="sub">Opened directly — sign in below, or launch this module from the BPL Integrated Monitoring hub.</p>
 
@@ -31,7 +31,7 @@
           <span class="pw-toggle" id="pwToggle">Show</span>
         </div>
       </div>
-      <button class="primary" type="submit">Sign In</button>
+      <button class="btn btn-primary btn-block" type="submit">Sign In</button>
       <div class="msg" id="loginMsg"></div>
     </form>
 
@@ -45,7 +45,7 @@
         <label>Confirm New Password</label>
         <input type="password" name="confirmPassword" required minlength="8">
       </div>
-      <button class="primary" type="submit">Set New Password &amp; Continue</button>
+      <button class="btn btn-primary btn-block" type="submit">Set New Password &amp; Continue</button>
       <div class="msg" id="resetMsg"></div>
     </form>
   </div>

@@ -1,25 +1,25 @@
 <script>
+var CORNERS = '<i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>';
+var MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
 var APP = {
   token: null,
   access: null,
+  hubUrl: null,
   bootstrap: null,
+  assessmentLaneCategoryRules: {},
 
   init: function () {
     this.bindTabs();
     this.bindForms();
+    this.bindLogout();
+    this.bindDiagnostics();
     var self = this;
     google.script.run
       .withSuccessHandler(function (data) {
         self.bootstrap = data;
         self.populateDropdowns(data);
         self.loadDashboard();
-        self.loadForecastEta();
-        self.loadForecastJob();
-        if (self.isAdminLike()) {
-          self.loadManageData();
-          self.loadAuditLog();
-          self.loadManageError();
-        }
       })
       .withFailureHandler(this.showFatalError)
       .api_getBootstrap(this.token);
@@ -34,16 +34,108 @@ var APP = {
       '<div class="msg error">' + (err && err.message ? err.message : err) + '</div>';
   },
 
+  bindLogout: function () {
+    var btn = document.getElementById('logoutBtn');
+    if (!btn) return;
+    var self = this;
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      google.script.run
+        .withSuccessHandler(function (res) {
+          window.top.location.href = res.hubUrl;
+        })
+        .withFailureHandler(function () {
+          // Even if invalidation failed server-side, still leave — staying
+          // logged into a module the user asked to log out of is worse.
+          window.top.location.href = self.hubUrl;
+        })
+        .api_logout(self.token);
+    });
+  },
+
+  // ---- TEMPORARY diagnostics (calls the real API endpoints exactly as the app does, dumps raw JSON) ----
+  bindDiagnostics: function () {
+    var btn = document.getElementById('runDiagnosticsBtn');
+    if (!btn) return;
+    var self = this;
+    btn.addEventListener('click', function () {
+      var out = document.getElementById('diagnosticsOutput');
+      out.style.display = 'block';
+      out.textContent = 'Running…';
+      var restore = self.setButtonBusy(btn, 'Running…');
+      var results = {};
+      var pending = 4;
+      function done(key, value) {
+        results[key] = value;
+        pending--;
+        if (pending === 0) {
+          restore();
+          out.textContent = JSON.stringify(results, null, 2);
+        }
+      }
+      google.script.run.withSuccessHandler(function (r) { done('api_getBootstrap', r); }).withFailureHandler(function (e) { done('api_getBootstrap', { ERROR: e.message || String(e) }); }).api_getBootstrap(self.token);
+      google.script.run.withSuccessHandler(function (r) { done('api_getJobUpdateCandidates', r); }).withFailureHandler(function (e) { done('api_getJobUpdateCandidates', { ERROR: e.message || String(e) }); }).api_getJobUpdateCandidates(self.token);
+      google.script.run.withSuccessHandler(function (r) { done('api_getForecastByJob(all)', r); }).withFailureHandler(function (e) { done('api_getForecastByJob(all)', { ERROR: e.message || String(e) }); }).api_getForecastByJob(self.token, '');
+      google.script.run.withSuccessHandler(function (r) { done('api_getDashboard(all)', r); }).withFailureHandler(function (e) { done('api_getDashboard(all)', { ERROR: e.message || String(e) }); }).api_getDashboard(self.token, '');
+    });
+  },
+
+  // ---- Two-level nav: primary group buttons + per-group subtab bars ----
   bindTabs: function () {
-    var buttons = document.querySelectorAll('#tabs button');
-    buttons.forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        buttons.forEach(function (b) { b.classList.remove('active'); });
+    var self = this;
+    var primaryButtons = document.querySelectorAll('#tabs button[data-group]');
+    var subtabNavs = document.querySelectorAll('nav.subtabs');
+
+    function showTab(group, tab, subtabNav) {
+      if (subtabNav) {
+        subtabNav.querySelectorAll('button').forEach(function (b) { b.classList.toggle('active', b.dataset.tab === tab); });
+      }
+      document.querySelectorAll('.panel').forEach(function (p) { p.classList.remove('active'); });
+      var panel = document.querySelector('.panel[data-group="' + group + '"][data-tab="' + tab + '"]');
+      if (panel) panel.classList.add('active');
+      self.onShow(group, tab);
+    }
+
+    function showGroup(group) {
+      primaryButtons.forEach(function (b) { b.classList.toggle('active', b.dataset.group === group); });
+      subtabNavs.forEach(function (nav) { nav.style.display = nav.dataset.group === group ? 'flex' : 'none'; });
+
+      var subtabNav = document.querySelector('nav.subtabs[data-group="' + group + '"]');
+      if (subtabNav) {
+        var activeBtn = subtabNav.querySelector('button.active') || subtabNav.querySelector('button');
+        if (activeBtn) showTab(group, activeBtn.dataset.tab, subtabNav);
+      } else {
         document.querySelectorAll('.panel').forEach(function (p) { p.classList.remove('active'); });
-        btn.classList.add('active');
-        document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+        var panel = document.querySelector('.panel[data-group="' + group + '"]');
+        if (panel) panel.classList.add('active');
+        self.onShow(group, null);
+      }
+    }
+
+    primaryButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () { showGroup(btn.dataset.group); });
+    });
+    subtabNavs.forEach(function (nav) {
+      nav.querySelectorAll('button').forEach(function (btn) {
+        btn.addEventListener('click', function () { showTab(nav.dataset.group, btn.dataset.tab, nav); });
       });
     });
+  },
+
+  /** Lazy-loads data for a panel the moment it's actually shown. */
+  onShow: function (group, tab) {
+    this.clearAllMsgs();
+    if (group === 'dashboard') this.loadDashboard();
+    else if (group === 'kpi') this.loadKpi();
+    else if (group === 'jobs' && tab === 'jobUpdate') this.loadJobUpdateCandidates();
+    else if (group === 'jobs' && tab === 'dialup') this.loadDialUpCandidates();
+    else if (group === 'jobs' && tab === 'vessel') this.loadVesselEtaGroups();
+    else if (group === 'reports' && tab === 'eta') this.loadForecastEta();
+    else if (group === 'reports' && tab === 'job') this.loadForecastJob();
+    else if (group === 'reports' && tab === 'all') this.showAllJobsPlaceholder();
+    else if (group === 'reports' && tab === 'audit') this.loadAuditLog();
+    else if (group === 'manageData') this.loadManageData();
+    else if (group === 'manageError') this.loadManageError();
   },
 
   todayStr: function () {
@@ -51,6 +143,162 @@ var APP = {
     var mm = String(d.getMonth() + 1).padStart(2, '0');
     var dd = String(d.getDate()).padStart(2, '0');
     return d.getFullYear() + '-' + mm + '-' + dd;
+  },
+
+  isoDate: function (v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    var dd = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + mm + '-' + dd;
+  },
+
+  money: function (n) {
+    var num = Number(n) || 0;
+    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+
+  /** Sets a .msg element's text/style and auto-clears it after 10s. Pass text='' to clear immediately. */
+  setMsg: function (el, text, cls) {
+    if (!el) return;
+    if (el._msgTimer) { clearTimeout(el._msgTimer); el._msgTimer = null; }
+    el.textContent = text || '';
+    el.className = 'msg' + (cls ? ' ' + cls : '');
+    if (text) {
+      el._msgTimer = setTimeout(function () {
+        el.textContent = '';
+        el.className = 'msg';
+        el._msgTimer = null;
+      }, 10000);
+    }
+  },
+
+  /** Clears every .msg on the page (and cancels their auto-dismiss timers) — called whenever the user switches tabs. */
+  clearAllMsgs: function () {
+    document.querySelectorAll('.msg').forEach(function (el) {
+      if (el._msgTimer) { clearTimeout(el._msgTimer); el._msgTimer = null; }
+      el.textContent = '';
+      el.className = 'msg';
+    });
+  },
+
+  /** Strips thousands-separator commas etc. and parses to a number, or null if not a valid amount. */
+  parseMoneyInput: function (v) {
+    var cleaned = String(v == null ? '' : v).replace(/,/g, '').trim();
+    if (cleaned === '') return null;
+    var n = parseFloat(cleaned);
+    return isNaN(n) ? null : n;
+  },
+
+  /** Comma + 2-decimal formatting on blur, plain editable number on focus. */
+  bindMoneyInput: function (input) {
+    if (!input || input.dataset.moneyBound) return;
+    input.dataset.moneyBound = '1';
+    input.addEventListener('focus', function () {
+      var raw = APP.parseMoneyInput(input.value);
+      input.value = raw === null ? '' : String(raw);
+    });
+    input.addEventListener('blur', function () {
+      var raw = APP.parseMoneyInput(input.value);
+      input.value = raw === null ? '' : APP.money(raw);
+    });
+  },
+
+  /** Disables `btn` and swaps its visible label (a .btn-label span if present, else its whole text) to `busyLabel`. Returns a restore() to undo it. */
+  setButtonBusy: function (btn, busyLabel) {
+    if (!btn || btn.disabled) return function () {};
+    var labelEl = btn.querySelector('.btn-label');
+    var original = labelEl ? labelEl.textContent : btn.textContent;
+    btn.disabled = true;
+    if (labelEl) labelEl.textContent = busyLabel; else btn.textContent = busyLabel;
+    return function restore() {
+      btn.disabled = false;
+      if (labelEl) labelEl.textContent = original; else btn.textContent = original;
+    };
+  },
+
+  formatDate: function (v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  },
+
+  /** Tag color for the computed Registered/Compiled/Dialled-up/Completed progress label. */
+  /** Color-coded plain text (no badge/box) for the Registered/Compiled/Dialled-up/Completed progress label. */
+  progressStatusClass: function (progress) {
+    if (progress === 'Completed') return 'status-completed';
+    if (progress === 'Dialled-up') return 'status-dialled';
+    if (progress === 'Compiled') return 'status-compiled';
+    return 'status-registered';
+  },
+
+  validateJobNumber_: function (jobNumber, shipmentType) {
+    var v = String(jobNumber || '').trim();
+    if (!/^(S|SC)\d{8}$/.test(v)) {
+      return 'Job # must start with S or SC followed by exactly 8 digits (e.g. S00001010, SC00001210).';
+    }
+    if (shipmentType === 'Air' && /^SC/.test(v)) {
+      return 'SC job numbers are not valid for Air shipments.';
+    }
+    return null;
+  },
+
+  /** Each Lane constrains which Category values are valid — mirrors server-side validateAssessmentType_. */
+  validateAssessmentType_: function (lane, category) {
+    var rules = (this.assessmentLaneCategoryRules && this.assessmentLaneCategoryRules[lane]) || { allowed: [], blankAllowed: true };
+    if (!category) {
+      if (!rules.blankAllowed) {
+        return 'Assessment Category is required when Assessment Lane is ' + lane + ' (' + rules.allowed.join(' or ') + ').';
+      }
+      return null;
+    }
+    if (rules.allowed.indexOf(category) === -1) {
+      var allowedDesc = rules.allowed.length ? rules.allowed.join(' or ') : 'blank';
+      return 'Assessment Category "' + category + '" is not valid for ' + (lane || 'no Assessment Lane') + ' — must be ' + allowedDesc + '.';
+    }
+    return null;
+  },
+
+  /**
+   * Rebuilds Assessment Category's own option list to whatever's valid for
+   * the currently selected Assessment Lane (plus the blank placeholder if
+   * blank is allowed), toggles its required-ness/asterisk, and sets its
+   * value to `presetValue` if given (falls back to whatever was already
+   * selected). If presetValue is a legacy value that's no longer valid for
+   * this Lane, it's kept as a selectable option instead of being silently
+   * discarded, so existing data is never hidden — just flagged.
+   */
+  syncAssessmentCategoryOptions: function (presetValue) {
+    var laneSel = document.querySelector('#jobUpdateForm select[name="assessmentLane"]');
+    var categorySel = document.querySelector('#jobUpdateForm select[name="assessmentCategory"]');
+    var label = document.getElementById('assessmentCategoryLabel');
+    if (!laneSel || !categorySel || !label) return;
+
+    var rules = (this.assessmentLaneCategoryRules && this.assessmentLaneCategoryRules[laneSel.value]) || { allowed: [], blankAllowed: true };
+    var currentValue = presetValue !== undefined ? presetValue : categorySel.value;
+
+    categorySel.innerHTML = '';
+    if (rules.blankAllowed || !currentValue) {
+      var blankOpt = document.createElement('option');
+      blankOpt.value = ''; blankOpt.textContent = '—';
+      categorySel.appendChild(blankOpt);
+    }
+    rules.allowed.forEach(function (c) {
+      var opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      categorySel.appendChild(opt);
+    });
+    if (currentValue && rules.allowed.indexOf(currentValue) === -1) {
+      var legacyOpt = document.createElement('option');
+      legacyOpt.value = currentValue;
+      legacyOpt.textContent = currentValue + ' (not valid for ' + (laneSel.value || 'no lane') + ' — please correct)';
+      categorySel.appendChild(legacyOpt);
+    }
+    categorySel.value = currentValue || '';
+    categorySel.required = !rules.blankAllowed;
+    label.innerHTML = 'Assessment Category' + (!rules.blankAllowed ? ' <span class="req">*</span>' : '');
   },
 
   populateDropdowns: function (data) {
@@ -72,32 +320,76 @@ var APP = {
       });
     }
 
-    document.querySelectorAll('#dashboardClientFilter, #etaClientFilter, #jobClientFilter').forEach(function (sel) {
+    document.querySelectorAll('#dashboardClientFilter, #etaClientFilter, #jobClientFilter, #allJobsClientFilter').forEach(function (sel) {
       fillSelect(sel, data.clients, 'All Clients');
     });
-    fillSelect(document.querySelector('#registerJobForm select[name="clientName"]'), data.clients);
-    fillSelect(document.querySelector('#topUpForm select[name="clientName"]'), data.clients);
-    fillSelect(document.querySelector('#registerJobForm select[name="vesselName"]'), data.vessels);
-    fillSelect(document.querySelector('#registerJobForm select[name="port"]'), data.ports);
+    var registerClientSel = document.querySelector('#registerJobForm select[name="clientName"]');
+    if (registerClientSel) fillSelect(registerClientSel, data.clients);
+    var topUpClientSel = document.querySelector('#topUpForm select[name="clientName"]');
+    if (topUpClientSel) fillSelect(topUpClientSel, data.clients);
+    var registerVesselSel = document.querySelector('#registerJobForm select[name="vesselName"]');
+    if (registerVesselSel) fillSelect(registerVesselSel, data.vessels);
+    var registerPortSel = document.querySelector('#registerJobForm select[name="port"]');
+    if (registerPortSel) fillSelect(registerPortSel, data.ports);
+    var registerShipmentSel = document.querySelector('#registerJobForm select[name="shipmentType"]');
+    if (registerShipmentSel) fillSelect(registerShipmentSel, data.shipmentTypes);
+    var jobUpdateVesselSel = document.querySelector('#jobUpdateForm select[name="vesselName"]');
+    if (jobUpdateVesselSel) fillSelect(jobUpdateVesselSel, data.vessels);
 
-    document.getElementById('topUpForm').topupDate.value = self.todayStr();
+    var laneSel = document.querySelector('#jobUpdateForm select[name="assessmentLane"]');
+    if (laneSel) fillSelect(laneSel, data.assessmentLanes, '—');
+    var categorySel = document.querySelector('#jobUpdateForm select[name="assessmentCategory"]');
+
+    self.assessmentLaneCategoryRules = data.assessmentLaneCategoryRules || {};
+    if (laneSel && categorySel) {
+      laneSel.addEventListener('change', function () { self.syncAssessmentCategoryOptions(); });
+      self.syncAssessmentCategoryOptions('');
+    }
+
+    if (document.getElementById('topUpForm')) document.getElementById('topUpForm').topupDate.value = self.todayStr();
+
+    ['#registerJobForm [name="amount"]', '#jobUpdateForm [name="amount"]', '#topUpForm [name="amount"]'].forEach(function (sel) {
+      self.bindMoneyInput(document.querySelector(sel));
+    });
+
+    // KPI filters
+    var kpiYear = document.getElementById('kpiYear');
+    if (kpiYear) {
+      kpiYear.innerHTML = '';
+      (data.kpiYears || [new Date().getFullYear()]).forEach(function (y) {
+        var opt = document.createElement('option'); opt.value = y; opt.textContent = y; kpiYear.appendChild(opt);
+      });
+      var kpiMonth = document.getElementById('kpiMonth');
+      kpiMonth.innerHTML = '<option value="all">All months</option>';
+      MONTH_NAMES.forEach(function (name, i) {
+        var opt = document.createElement('option'); opt.value = i + 1; opt.textContent = name; kpiMonth.appendChild(opt);
+      });
+      fillSelect(document.getElementById('kpiClient'), data.clients, 'All');
+      fillSelect(document.getElementById('kpiRegisteredBy'), data.kpiRegisteredByUsers || [], 'All');
+      kpiYear.addEventListener('change', function () { self.loadKpi(); });
+      kpiMonth.addEventListener('change', function () { self.loadKpi(); });
+      document.getElementById('kpiClient').addEventListener('change', function () { self.loadKpi(); });
+      document.getElementById('kpiRegisteredBy').addEventListener('change', function () { self.loadKpi(); });
+    }
 
     document.getElementById('dashboardClientFilter').addEventListener('change', function () {
       self.loadDashboard(this.value);
     });
-    document.getElementById('etaClientFilter').addEventListener('change', function () {
-      self.loadForecastEta(this.value);
-    });
-    document.getElementById('jobClientFilter').addEventListener('change', function () {
-      self.loadForecastJob(this.value);
+    document.querySelectorAll('#etaClientFilter, #etaINumberFilter').forEach(function (el) {
+      el.addEventListener('change', function () { self.loadForecastEta(); });
     });
 
-    self.loadForecastJobsIntoDialUp();
-  },
+    // Forecast by Jobs never shows Completed jobs (activeForecastJobs_ already
+    // excludes them), so that's not offered as a Status option here.
+    fillSelect(document.getElementById('jobStatusFilter'), ['Registered', 'Compiled', 'Dialled-up'], 'All');
+    document.querySelectorAll('#jobClientFilter, #jobINumberFilter, #jobStatusFilter').forEach(function (el) {
+      el.addEventListener('change', function () { self.loadForecastJob(); });
+    });
 
-  money: function (n) {
-    var num = Number(n) || 0;
-    return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    fillSelect(document.getElementById('allJobsStatusFilter'), ['Registered', 'Compiled', 'Dialled-up', 'Completed'], 'All');
+    document.querySelectorAll('#allJobsClientFilter, #allJobsDateFrom, #allJobsDateTo, #allJobsINumberFilter, #allJobsStatusFilter').forEach(function (el) {
+      el.addEventListener('change', function () { self.loadAllJobs(); });
+    });
   },
 
   // ---- Dashboard ----
@@ -114,11 +406,12 @@ var APP = {
 
     var balCard = data.balanceCard;
     var cardsHtml = '';
-    cardsHtml += '<div class="card"><h3>PPA Balance vs Forecasted Amount</h3>' +
-      '<div class="big ' + (balCard.isLow ? 'red' : 'green') + '">' + this.money(balCard.ppaBalance) + '</div>' +
-      '<div class="muted">Forecasted (status: Forecast): ' + this.money(balCard.forecastTotal) + '</div></div>';
+    cardsHtml += '<div class="card blueprint card-balance">' + CORNERS +
+      '<div class="card-kicker">PPA Balance vs Forecasted Amount</div>' +
+      '<div class="card-title big"' + (balCard.isLow ? ' style="color:var(--danger)"' : '') + '">' + this.money(balCard.ppaBalance) + '</div>' +
+      '<div class="card-meta">Forecast total: ' + this.money(balCard.forecastTotal) + '</div></div>';
 
-    cardsHtml += '<div class="card"><h3>Request Amount</h3>';
+    cardsHtml += '<div class="card blueprint card-request">' + CORNERS + '<div class="card-kicker">Request Amount — next 3 forecast rows</div><div class="card-title">Request Amount</div>';
     if (data.requestAmountCard.length) {
       cardsHtml += '<ul>' + data.requestAmountCard.map(function (r) {
         return '<li>' + r.label + '</li>';
@@ -128,7 +421,7 @@ var APP = {
     }
     cardsHtml += '</div>';
 
-    cardsHtml += '<div class="card"><h3>Recent Top-up</h3>';
+    cardsHtml += '<div class="card blueprint card-topup">' + CORNERS + '<div class="card-kicker">Recent Top-up</div><div class="card-title">Recent Top-up</div>';
     if (data.recentTopUpCard.length) {
       cardsHtml += '<ul>' + data.recentTopUpCard.map(function (t) {
         return '<li>' + t.label + '</li>';
@@ -139,139 +432,352 @@ var APP = {
     cardsHtml += '</div>';
 
     document.getElementById('dashboardCards').innerHTML = cardsHtml;
+    document.getElementById('dashboardJobTable').innerHTML = this.renderJobTable(data.forecastByJob);
     document.getElementById('dashboardEtaTable').innerHTML = this.renderEtaTable(data.forecastByEta);
   },
 
-  // ---- Forecast by ETA ----
-  loadForecastEta: function (clientName) {
+  // ---- KPI ----
+  loadKpi: function () {
     var self = this;
+    var year = document.getElementById('kpiYear').value;
+    var month = document.getElementById('kpiMonth').value;
+    var client = document.getElementById('kpiClient').value;
+    var registeredBy = document.getElementById('kpiRegisteredBy').value;
+    google.script.run
+      .withSuccessHandler(function (data) { self.renderKpi(data); })
+      .withFailureHandler(this.showFatalError)
+      .api_getKpi(this.token, year, month, client, registeredBy);
+  },
+
+  kpiRow_: function (label, sub, obj, cmp) {
+    var pctText = obj.pct === null ? '---' : obj.pct.toFixed(1) + '%';
+    var style = obj.ok ? '' : ' style="color:var(--danger)"';
+    return '<li' + style + '><strong>' + label + '</strong> — ' + pctText +
+      ' <span class="muted">(' + sub + ', target ' + cmp + obj.target + '%)</span></li>';
+  },
+
+  renderKpi: function (K) {
+    var compilingHtml = '<div class="card blueprint card-compiling">' + CORNERS +
+      '<div class="card-kicker">Compiling — target 90% and above</div><div class="card-title">Compiling</div><ul>' +
+      this.kpiRow_('Sea', 'compiled 3+ days before ETA', K.compiling.sea, '≥ ') +
+      this.kpiRow_('Air', 'compiled 1+ day before ETA', K.compiling.air, '≥ ') +
+      '</ul></div>';
+
+    var diallingHtml = '<div class="card blueprint card-dialling">' + CORNERS +
+      '<div class="card-kicker">Dialing-up — Sea Tier 1 target 70%+, Tiers 2/3 below 20%; Air target above 90%</div><div class="card-title">Dialing-up</div><ul>' +
+      this.kpiRow_('Sea Tier 1', '2+ days before ETA', K.dialling.seaTier1, '≥ ') +
+      this.kpiRow_('Sea Tier 2', '1 day before ETA', K.dialling.seaTier2, '< ') +
+      this.kpiRow_('Sea Tier 3', 'same ETA or beyond', K.dialling.seaTier3, '< ') +
+      this.kpiRow_('Air', 'on or before ETA', K.dialling.air, '> ') +
+      '</ul></div>';
+
+    document.getElementById('kpiCards').innerHTML = compilingHtml + diallingHtml;
+
+    var self = this;
+    var rows = K.jobs.map(function (j) {
+      return '<tr><td>' + self.formatDate(j.registeredDate) + '</td><td>' + j.jobNumber + '</td><td>' + j.clientName +
+        '</td><td>' + (j.shipmentType || '') + '</td><td>' + self.formatDate(j.vesselEta) + '</td>' +
+        '<td>' + (j.compiledDate ? self.formatDate(j.compiledDate) : '—') + '</td>' +
+        '<td>' + (j.dialupDate ? self.formatDate(j.dialupDate) : '—') + '</td></tr>';
+    }).join('');
+    document.getElementById('kpiJobTable').innerHTML = K.jobs.length ?
+      '<table class="data-table"><thead><tr><th>Registration Date</th><th>Job #</th><th>Client</th><th>Shipment Type</th><th>ETA</th><th>Compiled Date</th><th>Dial-up Date</th></tr></thead><tbody>' + rows + '</tbody></table>' :
+      '<p class="muted">No jobs for this filter.</p>';
+  },
+
+  // ---- Forecast by ETA ----
+  loadForecastEta: function () {
+    var self = this;
+    var clientName = document.getElementById('etaClientFilter').value;
+    var iNumber = document.getElementById('etaINumberFilter').value;
     google.script.run
       .withSuccessHandler(function (rows) {
         document.getElementById('forecastEtaTable').innerHTML = self.renderEtaTable(rows);
       })
       .withFailureHandler(this.showFatalError)
-      .api_getForecastByEta(this.token, clientName || '');
+      .api_getForecastByEta(this.token, clientName || '', iNumber || '');
   },
 
   renderEtaTable: function (rows) {
     if (!rows.length) return '<p class="muted">No forecasted jobs.</p>';
-    var maxPorts = rows.reduce(function (m, r) { return Math.max(m, r.ports.length); }, 1);
-    var portHeaders = [];
-    for (var i = 0; i < maxPorts; i++) portHeaders.push('<th>Port' + (maxPorts > 1 ? ' ' + (i + 1) : '') + '</th>');
-
+    var total = rows.reduce(function (sum, r) { return sum + (Number(r.amount) || 0); }, 0);
     var body = rows.map(function (r) {
-      var portCells = [];
-      for (var i = 0; i < maxPorts; i++) portCells.push('<td>' + (r.ports[i] || '') + '</td>');
-      return '<tr><td>' + APP.formatDate(r.vesselEta) + '</td>' + portCells.join('') +
-        '<td class="amount-cell ' + r.color + '">' + APP.money(r.amount) +
-        ' <span class="badge ' + r.color + '">' + (r.color === 'green' ? 'Sufficient' : 'Insufficient') + '</span></td></tr>';
+      return '<tr><td>' + APP.formatDate(r.vesselEta) + '</td><td>' + r.vessels.join(', ') + '</td><td>' + r.ports.join(', ') + '</td>' +
+        '<td>' + r.regDates.join(', ') + '</td>' +
+        '<td class="amount-cell' + (r.color === 'red' ? ' danger' : '') + '">' + APP.money(r.amount) + '</td></tr>';
     }).join('');
+    body += '<tr style="font-weight:700;border-top:2px solid var(--color-divider);">' +
+      '<td colspan="4" style="text-align:right;">Total</td><td class="amount-cell">' + APP.money(total) + '</td></tr>';
 
-    return '<table class="data-table"><thead><tr><th>Vessel ETA</th>' + portHeaders.join('') +
-      '<th>Amount</th></tr></thead><tbody>' + body + '</tbody></table>';
+    return '<table class="data-table"><thead><tr><th>Vessel ETA</th><th>Vessel Name</th><th>Port</th><th>Registration Date</th><th>Amount</th></tr></thead><tbody>' + body + '</tbody></table>';
   },
 
-  formatDate: function (v) {
-    if (!v) return '';
-    var d = new Date(v);
-    if (isNaN(d.getTime())) return String(v);
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  },
-
-  // ---- Forecast by Job ----
-  loadForecastJob: function (clientName) {
+  // ---- Forecast by Jobs ----
+  loadForecastJob: function () {
     var self = this;
+    var clientName = document.getElementById('jobClientFilter').value;
+    var iNumber = document.getElementById('jobINumberFilter').value;
+    var status = document.getElementById('jobStatusFilter').value;
     google.script.run
       .withSuccessHandler(function (rows) {
         document.getElementById('forecastJobTable').innerHTML = self.renderJobTable(rows);
       })
       .withFailureHandler(this.showFatalError)
-      .api_getForecastByJob(this.token, clientName || '');
+      .api_getForecastByJob(this.token, clientName || '', iNumber || '', status || '');
   },
 
   renderJobTable: function (rows) {
     if (!rows.length) return '<p class="muted">No forecasted jobs.</p>';
+    var total = rows.reduce(function (sum, r) { return sum + (Number(r.amount) || 0); }, 0);
     var body = rows.map(function (r) {
-      return '<tr><td>' + APP.formatDate(r.vesselEta) + '</td><td>' + r.vesselName + '</td><td>' + r.port +
-        '</td><td class="amount-cell ' + r.color + '">' + APP.money(r.amount) +
-        ' <span class="badge ' + r.color + '">' + (r.color === 'green' ? 'Sufficient' : 'Insufficient') + '</span></td></tr>';
+      var progressTag = '<span class="status-text ' + APP.progressStatusClass(r.progress) + '">' + r.progress + '</span>';
+      return '<tr><td>' + APP.formatDate(r.vesselEta) + '</td><td>' + progressTag + '</td><td>' + r.jobNumber +
+        '</td><td>' + (r.shipmentType || '') + '</td><td>' + r.vesselName + '</td><td>' + r.port +
+        '</td><td>' + (r.remarks || '—') + '</td>' +
+        '<td class="amount-cell' + (r.color === 'red' ? ' danger' : '') + '">' + APP.money(r.amount) + '</td></tr>';
     }).join('');
-    return '<table class="data-table"><thead><tr><th>Vessel ETA</th><th>Vessel Name</th><th>Port</th><th>Amount</th></tr></thead><tbody>' + body + '</tbody></table>';
+    body += '<tr style="font-weight:700;border-top:2px solid var(--color-divider);">' +
+      '<td colspan="7" style="text-align:right;">Total</td><td class="amount-cell">' + APP.money(total) + '</td></tr>';
+    return '<table class="data-table"><thead><tr><th>Vessel ETA</th><th>Status</th><th>Job #</th><th>Shipment Type</th><th>Vessel Name</th><th>Port</th><th>Remarks</th><th>Amount</th></tr></thead><tbody>' + body + '</tbody></table>';
+  },
+
+  // ---- All Jobs ----
+  // Never auto-loads (that's the whole point of the date-range gate) — see
+  // showAllJobsPlaceholder(), called on tab entry, and the filter change
+  // listeners in populateDropdowns() that call this once the user actually
+  // picks something.
+  loadAllJobs: function () {
+    var self = this;
+    var clientName = document.getElementById('allJobsClientFilter').value;
+    var etaFrom = document.getElementById('allJobsDateFrom').value;
+    var etaTo = document.getElementById('allJobsDateTo').value;
+    var iNumber = document.getElementById('allJobsINumberFilter').value;
+    var status = document.getElementById('allJobsStatusFilter').value;
+    document.getElementById('allJobsTable').innerHTML = '<p class="muted">Loading…</p>';
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        document.getElementById('allJobsTable').innerHTML = self.renderAllJobsTable(rows);
+      })
+      .withFailureHandler(this.showFatalError)
+      .api_getAllJobs(this.token, clientName || '', etaFrom || '', etaTo || '', iNumber || '', status || '');
+  },
+
+  showAllJobsPlaceholder: function () {
+    document.getElementById('allJobsClientFilter').value = '';
+    document.getElementById('allJobsINumberFilter').value = '';
+    document.getElementById('allJobsStatusFilter').value = '';
+    document.getElementById('allJobsDateFrom').value = '';
+    document.getElementById('allJobsDateTo').value = '';
+    document.getElementById('allJobsTable').innerHTML =
+      '<p class="muted">Select an ETA date range and/or client, then it will load automatically.</p>';
+  },
+
+  renderAllJobsTable: function (rows) {
+    if (!rows.length) return '<p class="muted">No jobs.</p>';
+    var self = this;
+    var total = rows.reduce(function (sum, r) { return sum + (Number(r.amount) || 0); }, 0);
+    var body = rows.map(function (r) {
+      var statusTag = '<span class="status-text ' + self.progressStatusClass(r.progress) + '">' + r.progress + '</span>';
+      return '<tr><td>' + self.formatDate(r.vesselEta) + '</td><td>' + r.jobNumber + '</td><td>' + r.clientName +
+        '</td><td>' + (r.shipmentType || '') + '</td><td>' + statusTag + '</td>' +
+        '<td>' + self.formatDate(r.registeredDate) + '</td>' +
+        '<td>' + (r.compiledDate ? self.formatDate(r.compiledDate) : '—') + '</td>' +
+        '<td>' + (r.dialupDate ? self.formatDate(r.dialupDate) : '—') + '</td>' +
+        '<td>' + r.vesselName + '</td><td>' + (r.voyageNumber || '') + '</td><td>' + r.port + '</td>' +
+        '<td class="amount-cell">' + self.money(r.amount) + '</td>' +
+        '<td>' + (r.iNumber || '—') + '</td><td>' + (r.assessmentNo || '—') + '</td><td>' + (r.receiptPaymentNo || '—') + '</td>' +
+        '<td>' + (r.remarks || '—') + '</td></tr>';
+    }).join('');
+    body += '<tr style="font-weight:700;border-top:2px solid var(--color-divider);">' +
+      '<td colspan="11" style="text-align:right;">Total</td><td class="amount-cell">' + self.money(total) + '</td><td colspan="4"></td></tr>';
+    return '<table class="data-table"><thead><tr><th>ETA</th><th>Job #</th><th>Client</th><th>Shipment Type</th><th>Status</th>' +
+      '<th>Registration Date</th><th>Compiled Date</th><th>Dial-up Date</th><th>Vessel/Aircraft</th><th>Voy #</th><th>Port</th>' +
+      '<th>Duty Payable</th><th>I Number</th><th>Assessment No.</th><th>Receipt Payment No.</th><th>Remarks</th></tr></thead><tbody>' + body + '</tbody></table>';
   },
 
   // ---- Forms ----
   bindForms: function () {
     var self = this;
+
     document.getElementById('registerJobForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var f = e.target;
+      var msg = document.getElementById('registerJobMsg');
+      self.setMsg(msg, '');
+
+      var jobError = self.validateJobNumber_(f.jobNumber.value, f.shipmentType.value);
+      if (jobError) { self.setMsg(msg, jobError, 'error'); return; }
+
       var form = {
         clientName: f.clientName.value, jobNumber: f.jobNumber.value, vesselEta: f.vesselEta.value,
         vesselName: f.vesselName.value, voyageNumber: f.voyageNumber.value, port: f.port.value,
-        amount: f.amount.value, remarks: f.remarks.value
+        shipmentType: f.shipmentType.value, amount: f.amount.value, remarks: f.remarks.value
       };
-      var msg = document.getElementById('registerJobMsg');
-      msg.textContent = ''; msg.className = 'msg';
+      var restore = self.setButtonBusy(f.querySelector('button[type="submit"]'), 'Registering…');
       google.script.run
         .withSuccessHandler(function () {
-          msg.textContent = 'Job registered — status set to Forecast.'; msg.className = 'msg success';
+          restore();
+          self.setMsg(msg, 'Job ' + form.jobNumber + ' registered to the Forecast queue.', 'success');
+          var keepClient = f.clientName.value, keepVessel = f.vesselName.value, keepPort = f.port.value, keepType = f.shipmentType.value;
           f.reset();
-          self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); self.loadForecastJobsIntoDialUp();
+          f.clientName.value = keepClient; f.vesselName.value = keepVessel; f.port.value = keepPort; f.shipmentType.value = keepType;
+          self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob();
         })
-        .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
+        .withFailureHandler(function (err) { restore(); self.setMsg(msg, err.message || err, 'error'); })
         .api_registerJob(self.token, form);
     });
 
-    document.getElementById('dialUpForm').addEventListener('submit', function (e) {
+    document.getElementById('jobUpdateForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var f = e.target;
-      var form = { jobNumber: f.jobNumber.value, dialupDate: f.dialupDate.value };
-      var msg = document.getElementById('dialUpMsg');
-      msg.textContent = ''; msg.className = 'msg';
-      google.script.run
-        .withSuccessHandler(function () {
-          msg.textContent = 'Dial-up confirmed — status set to Dialled-up.'; msg.className = 'msg success';
-          f.reset(); f.dialupDate.value = self.todayStr();
-          self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); self.loadForecastJobsIntoDialUp();
-        })
-        .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
-        .api_dialUp(self.token, form);
-    });
+      var msg = document.getElementById('jobUpdateMsg');
+      if (!f.jobNumber.value) { self.setMsg(msg, 'Select a job first.', 'error'); return; }
 
-    document.getElementById('topUpForm').addEventListener('submit', function (e) {
-      e.preventDefault();
-      var f = e.target;
+      var assessmentError = self.validateAssessmentType_(f.assessmentLane.value, f.assessmentCategory.value);
+      if (assessmentError) { self.setMsg(msg, assessmentError, 'error'); return; }
+
       var form = {
-        topupDate: f.topupDate.value, clientName: f.clientName.value, amount: f.amount.value,
-        raNumber: f.raNumber.value, remarks: f.remarks.value
+        jobNumber: f.jobNumber.value, vesselName: f.vesselName.value, vesselEta: f.vesselEta.value,
+        amount: f.amount.value, compiledDate: f.compiledDate.value,
+        iNumber: f.iNumber.value, assessmentNo: f.assessmentNo.value, receiptPaymentNo: f.receiptPaymentNo.value,
+        assessmentLane: f.assessmentLane.value, assessmentCategory: f.assessmentCategory.value, remarks: f.remarks.value
       };
-      var msg = document.getElementById('topUpMsg');
-      msg.textContent = ''; msg.className = 'msg';
+      self.setMsg(msg, '');
+      var restore = self.setButtonBusy(f.querySelector('button[type="submit"]'), 'Updating…');
       google.script.run
         .withSuccessHandler(function () {
-          msg.textContent = 'Top-up recorded.'; msg.className = 'msg success';
-          f.reset(); f.topupDate.value = self.todayStr();
-          self.loadDashboard();
+          restore();
+          self.setMsg(msg, 'Job updated.', 'success');
+          self.loadJobUpdateCandidates();
+          self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob();
         })
-        .withFailureHandler(function (err) { msg.textContent = err.message || err; msg.className = 'msg error'; })
-        .api_topUp(self.token, form);
+        .withFailureHandler(function (err) { restore(); self.setMsg(msg, err.message || err, 'error'); })
+        .api_updateJob(self.token, form);
     });
 
-    document.getElementById('dialUpForm').jobNumber.value = '';
+    var dialUpForm = document.getElementById('dialUpForm');
+    if (dialUpForm) {
+      dialUpForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var f = e.target;
+        var msg = document.getElementById('dialUpMsg');
+        if (!f.jobNumber.value) { self.setMsg(msg, 'Select a job first.', 'error'); return; }
+        var form = { jobNumber: f.jobNumber.value, dialupDate: f.dialupDate.value };
+        self.setMsg(msg, '');
+        var restore = self.setButtonBusy(f.querySelector('button[type="submit"]'), 'Dialling up…');
+        google.script.run
+          .withSuccessHandler(function () {
+            restore();
+            self.setMsg(msg, f.jobNumber.value + ' dialled up — PPA Balance updated.', 'success');
+            f.reset(); f.dialupDate.value = self.todayStr();
+            self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); self.loadDialUpCandidates();
+          })
+          .withFailureHandler(function (err) { restore(); self.setMsg(msg, err.message || err, 'error'); })
+          .api_dialUp(self.token, form);
+      });
+    }
+
+    var topUpForm = document.getElementById('topUpForm');
+    if (topUpForm) {
+      topUpForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var f = e.target;
+        var msg = document.getElementById('topUpMsg');
+        if (!f.clientName.value || !f.amount.value) {
+          self.setMsg(msg, 'Client and amount are required.', 'error');
+          return;
+        }
+        var form = {
+          topupDate: f.topupDate.value, clientName: f.clientName.value, amount: f.amount.value,
+          raNumber: f.raNumber.value, remarks: f.remarks.value
+        };
+        self.setMsg(msg, '');
+        var restore = self.setButtonBusy(f.querySelector('button[type="submit"]'), 'Recording…');
+        google.script.run
+          .withSuccessHandler(function () {
+            restore();
+            self.setMsg(msg, 'Top-up of ' + APP.money(APP.parseMoneyInput(form.amount)) + ' recorded for ' + form.clientName + '.', 'success');
+            f.reset(); f.topupDate.value = self.todayStr();
+            self.loadDashboard();
+          })
+          .withFailureHandler(function (err) { restore(); self.setMsg(msg, err.message || err, 'error'); })
+          .api_topUp(self.token, form);
+      });
+    }
   },
 
-  loadForecastJobsIntoDialUp: function () {
+  // ---- Job Update candidates ----
+  loadJobUpdateCandidates: function () {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function (rows) {
+        var select = document.querySelector('#jobUpdateForm select[name="jobNumber"]');
+        select.innerHTML = '<option value="">Select a job</option>';
+        rows.forEach(function (r) {
+          var opt = document.createElement('option');
+          opt.value = r.jobNumber;
+          opt.textContent = r.jobNumber + ' — ' + r.clientName + ' (' + r.progress + ')';
+          opt.dataset.client = r.clientName || '';
+          opt.dataset.vessel = r.vesselName || '';
+          opt.dataset.eta = APP.isoDate(r.vesselEta);
+          opt.dataset.amount = r.amount;
+          opt.dataset.compiled = APP.isoDate(r.compiledDate);
+          opt.dataset.iNumber = r.iNumber || '';
+          opt.dataset.assessmentNo = r.assessmentNo || '';
+          opt.dataset.receiptPaymentNo = r.receiptPaymentNo || '';
+          opt.dataset.assessmentLane = r.assessmentLane || '';
+          opt.dataset.assessmentCategory = r.assessmentCategory || '';
+          opt.dataset.remarks = r.remarks || '';
+          opt.dataset.locked = r.locked ? '1' : '';
+          select.appendChild(opt);
+        });
+        select.onchange = function () {
+          var opt = select.options[select.selectedIndex];
+          var f = document.getElementById('jobUpdateForm');
+          var locked = opt.dataset.locked === '1';
+
+          f.clientNameDisplay.value = opt.dataset.client || '';
+          f.vesselName.value = opt.dataset.vessel || '';
+          f.vesselEta.value = opt.dataset.eta || '';
+          f.amount.value = opt.dataset.amount ? APP.money(opt.dataset.amount) : '';
+          f.compiledDate.value = opt.dataset.compiled || '';
+          f.vesselName.disabled = locked;
+          f.vesselEta.disabled = locked;
+          f.amount.disabled = locked;
+          f.compiledDate.disabled = locked;
+
+          f.iNumber.value = opt.dataset.iNumber || '';
+          f.assessmentNo.value = opt.dataset.assessmentNo || '';
+          f.receiptPaymentNo.value = opt.dataset.receiptPaymentNo || '';
+          f.assessmentLane.value = opt.dataset.assessmentLane || '';
+          f.remarks.value = opt.dataset.remarks || '';
+          self.syncAssessmentCategoryOptions(opt.dataset.assessmentCategory || '');
+        };
+      })
+      .withFailureHandler(this.showFatalError)
+      .api_getJobUpdateCandidates(this.token);
+  },
+
+  // ---- Dial-up candidates (compiled jobs only — the compiled-before-dial-up gate) ----
+  loadDialUpCandidates: function () {
     var self = this;
     google.script.run
       .withSuccessHandler(function (rows) {
         var select = document.querySelector('#dialUpForm select[name="jobNumber"]');
-        select.innerHTML = '<option value="">Select a Forecast job</option>';
+        if (!select) return;
+        select.innerHTML = '<option value="">Select a compiled job</option>';
         rows.forEach(function (r) {
           var opt = document.createElement('option');
           opt.value = r.jobNumber;
           opt.textContent = r.jobNumber + ' — ' + APP.money(r.amount);
           opt.dataset.client = r.clientName || '';
           opt.dataset.amount = r.amount;
+          opt.dataset.iNumber = r.iNumber || '';
+          opt.dataset.assessmentNo = r.assessmentNo || '';
+          opt.dataset.receiptPaymentNo = r.receiptPaymentNo || '';
+          opt.dataset.assessmentLane = r.assessmentLane || '';
+          opt.dataset.assessmentCategory = r.assessmentCategory || '';
+          opt.dataset.remarks = r.remarks || '';
           select.appendChild(opt);
         });
         select.onchange = function () {
@@ -279,84 +785,264 @@ var APP = {
           var f = document.getElementById('dialUpForm');
           f.clientNameDisplay.value = opt.dataset.client || '';
           f.amountDisplay.value = opt.dataset.amount ? APP.money(opt.dataset.amount) : '';
+          f.iNumberDisplay.value = opt.dataset.iNumber || '';
+          f.assessmentNoDisplay.value = opt.dataset.assessmentNo || '';
+          f.receiptPaymentNoDisplay.value = opt.dataset.receiptPaymentNo || '';
+          f.assessmentLaneDisplay.value = opt.dataset.assessmentLane || '';
+          f.assessmentCategoryDisplay.value = opt.dataset.assessmentCategory || '';
+          f.remarksDisplay.value = opt.dataset.remarks || '';
         };
       })
       .withFailureHandler(this.showFatalError)
-      .api_getForecastByJob(this.token, '');
-    document.getElementById('dialUpForm').dialupDate.value = this.todayStr();
+      .api_getDialUpCandidates(this.token);
+    if (document.getElementById('dialUpForm')) document.getElementById('dialUpForm').dialupDate.value = this.todayStr();
+  },
+
+  // ---- Update Vessel ETA ----
+  loadVesselEtaGroups: function () {
+    var self = this;
+    google.script.run
+      .withSuccessHandler(function (rows) { self.renderVesselEtaTable(rows); })
+      .withFailureHandler(this.showFatalError)
+      .api_getVesselEtaGroups(this.token);
+  },
+
+  renderVesselEtaTable: function (rows) {
+    var self = this;
+    if (!rows.length) {
+      document.getElementById('vesselEtaTable').innerHTML = '<p class="muted">No eligible jobs.</p>';
+      return;
+    }
+    var body = rows.map(function (r, i) {
+      return '<tr><td><input type="date" class="input" data-idx="' + i + '" value="' + self.isoDate(r.eta) + '"></td>' +
+        '<td>' + r.port + '</td><td>' + r.vessel + '</td>' +
+        '<td><button class="btn btn-secondary blueprint" data-idx="' + i + '" data-vessel="' + r.vessel.replace(/"/g, '&quot;') + '" data-port="' + r.port.replace(/"/g, '&quot;') + '"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i><span class="btn-label">Update</span></button></td></tr>';
+    }).join('');
+    document.getElementById('vesselEtaTable').innerHTML =
+      '<table class="data-table"><thead><tr><th>ETA</th><th>Port</th><th>Vessel</th><th></th></tr></thead><tbody>' + body + '</tbody></table>';
+
+    document.querySelectorAll('#vesselEtaTable button[data-vessel]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var input = document.querySelector('#vesselEtaTable input[data-idx="' + btn.dataset.idx + '"]');
+        var newEta = input.value;
+        if (!newEta) return;
+        var msg = document.getElementById('vesselEtaMsg');
+        self.setMsg(msg, '');
+        var restore = self.setButtonBusy(btn, 'Updating…');
+        google.script.run
+          .withSuccessHandler(function (res) {
+            self.setMsg(msg, 'Updated ' + res.updated + ' job(s) to ' + self.formatDate(newEta) + '.', 'success');
+            self.loadVesselEtaGroups(); self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob();
+          })
+          .withFailureHandler(function (err) { restore(); self.setMsg(msg, err.message || err, 'error'); })
+          .api_updateVesselEta(self.token, btn.dataset.vessel, btn.dataset.port, newEta);
+      });
+    });
+  },
+
+  // ---- Dialogs (replaces prompt()/confirm() with the actual design's modal) ----
+  showDialog: function (opts) {
+    var backdrop = document.createElement('div');
+    backdrop.className = 'dialog-backdrop';
+    var fieldsHtml = (opts.fields || []).map(function (f) {
+      var labelHtml = '<div class="field"><label>' + f.label + (f.required ? ' <span class="req">*</span>' : '') + '</label>';
+      if (f.type === 'select') {
+        var optionsHtml = (f.options || []).map(function (o) {
+          return '<option value="' + o + '"' + (f.value === o ? ' selected' : '') + '>' + o + '</option>';
+        }).join('');
+        return labelHtml + '<select class="input" data-field="' + f.name + '"' + (f.required ? ' required' : '') + '>' + optionsHtml + '</select></div>';
+      }
+      return labelHtml + '<input class="input" type="' + (f.type || 'text') + '" data-field="' + f.name + '" value="' +
+        (f.value ? String(f.value).replace(/"/g, '&quot;') : '') + '"' + (f.required ? ' required' : '') + '></div>';
+    }).join('');
+    backdrop.innerHTML =
+      '<div class="dialog blueprint"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>' +
+      '<div class="dialog-title">' + opts.title + '</div>' +
+      (opts.bodyHtml ? '<div class="dialog-body">' + opts.bodyHtml + '</div>' : '') +
+      fieldsHtml +
+      '<div class="msg error" data-dialog-msg></div>' +
+      '<div class="dialog-actions"><button class="btn btn-secondary" data-cancel type="button">Cancel</button>' +
+      '<button class="btn ' + (opts.confirmClass || 'btn-primary') + '" data-confirm type="button">' + opts.confirmLabel + '</button></div>' +
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    function close() { document.body.removeChild(backdrop); }
+    var cancelBtn = backdrop.querySelector('[data-cancel]');
+    var confirmBtn = backdrop.querySelector('[data-confirm]');
+    var msgEl = backdrop.querySelector('[data-dialog-msg]');
+    var confirmLabel = confirmBtn.textContent;
+    cancelBtn.addEventListener('click', close);
+    backdrop.addEventListener('click', function (e) { if (e.target === backdrop) close(); });
+    confirmBtn.addEventListener('click', function () {
+      var values = {};
+      var missing = false;
+      backdrop.querySelectorAll('[data-field]').forEach(function (input) {
+        values[input.dataset.field] = input.value.trim();
+        if (input.required && !values[input.dataset.field]) missing = true;
+      });
+      if (missing) {
+        msgEl.textContent = 'Please fill in all required fields.';
+        return;
+      }
+      msgEl.textContent = '';
+      cancelBtn.disabled = true;
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = 'Working…';
+      // Stays open (busy) until the caller reports success/error, so the
+      // dialog itself is the "this is working" indicator for these actions.
+      opts.onConfirm(values, {
+        onSuccess: close,
+        onError: function (err) {
+          cancelBtn.disabled = false;
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = confirmLabel;
+          msgEl.textContent = err && err.message ? err.message : err;
+        }
+      });
+    });
   },
 
   // ---- Manage Data ----
   loadManageData: function () {
     var self = this;
-    var typeSelect = document.getElementById('manageDataType');
-    function render() {
-      google.script.run
-        .withSuccessHandler(function (rows) { self.renderManageData(typeSelect.value, rows); })
-        .withFailureHandler(self.showFatalError)
-        .api_manageDataList(self.token, typeSelect.value);
+    var typeInputs = document.querySelectorAll('#manageDataType input[name="manageDataType"]');
+    function currentType() {
+      var checked = document.querySelector('#manageDataType input[name="manageDataType"]:checked');
+      return checked ? checked.value : 'client';
     }
-    typeSelect.addEventListener('change', render);
-    document.getElementById('manageDataAddBtn').addEventListener('click', function () {
-      self.promptManageDataAdd(typeSelect.value, render);
-    });
+    function render() {
+      var type = currentType();
+      google.script.run
+        .withSuccessHandler(function (rows) { self.renderManageData(type, rows); })
+        .withFailureHandler(self.showFatalError)
+        .api_manageDataList(self.token, type);
+    }
+    typeInputs.forEach(function (input) { input.onchange = render; });
+    document.getElementById('manageDataAddBtn').onclick = function () {
+      self.showManageDataAddDialog(currentType(), null, render);
+    };
     render();
   },
 
+  /**
+   * Daily Report entries need a different dialog shape (Client Name
+   * picked from existing clients + a Recipient Emails field) than the
+   * generic single-name dialog every other Manage Data type uses.
+   * existing (client name string) pre-fills the dialog for editing an
+   * already-configured entry instead of adding a new one — reuses the
+   * same manageDataSave update-by-key path either way.
+   */
+  showManageDataAddDialog: function (type, existing, onDone) {
+    var self = this;
+    var keyField = self.keyFieldFor(type);
+
+    if (type === 'dailyReport') {
+      var currentEmails = '';
+      if (existing) {
+        var row = document.querySelector('#manageDataTable tr[data-row-key="' + CSS.escape(existing) + '"]');
+        currentEmails = row ? row.dataset.emails : '';
+      }
+      self.showDialog({
+        title: existing ? 'Edit Daily Report — ' + existing : 'Add Daily Report',
+        fields: [
+          { name: 'clientName', label: 'Client Name', type: 'select', options: (self.bootstrap && self.bootstrap.clients) || [], required: true, value: existing || undefined },
+          { name: 'emails', label: 'Recipient Emails', required: true, value: currentEmails }
+        ],
+        confirmLabel: existing ? 'Save' : 'Add',
+        onConfirm: function (values, dialog) {
+          var record = { 'Client Name': values.clientName, 'Recipient Emails': values.emails };
+          google.script.run
+            .withSuccessHandler(function () { onDone(); dialog.onSuccess(); })
+            .withFailureHandler(dialog.onError)
+            .api_manageDataSave(self.token, type, record);
+        }
+      });
+      return;
+    }
+
+    self.showDialog({
+      title: 'Add ' + keyField,
+      fields: [{ name: 'name', label: keyField, required: true }],
+      confirmLabel: 'Add',
+      onConfirm: function (values, dialog) {
+        var record = {};
+        record[keyField] = values.name;
+        google.script.run
+          .withSuccessHandler(function () { onDone(); dialog.onSuccess(); })
+          .withFailureHandler(dialog.onError)
+          .api_manageDataSave(self.token, type, record);
+      }
+    });
+  },
+
   keyFieldFor: function (type) {
-    return type === 'client' ? 'Client Name' : type === 'vessel' ? 'Vessel Name' : 'Port';
+    return type === 'client' ? 'Client Name' : type === 'vessel' ? 'Vessel Name' : type === 'dailyReport' ? 'Client Name' : 'Port';
   },
 
   renderManageData: function (type, rows) {
     var self = this;
     var keyField = this.keyFieldFor(type);
+    var isAdminLike = this.isAdminLike();
+    var isDailyReport = type === 'dailyReport';
+
     var body = rows.map(function (r) {
       var active = r['Active'] === true || r['Active'] === 'Y';
+      var actions = isAdminLike
+        ? (isDailyReport ? '<button class="btn btn-secondary" data-edit="' + r[keyField] + '">Edit</button> ' : '') +
+          '<button class="btn btn-secondary" data-key="' + r[keyField] + '" data-active="' + active + '">' +
+          (active ? 'Deactivate' : 'Activate') + '</button>'
+        : '';
+      if (isDailyReport) {
+        return '<tr data-row-key="' + r[keyField] + '" data-emails="' + (r['Recipient Emails'] || '').replace(/"/g, '&quot;') + '">' +
+          '<td>' + r[keyField] + '</td><td>' + (r['Recipient Emails'] || '') + '</td>' +
+          '<td><span class="tag ' + (active ? 'tag-accent' : 'tag-neutral') + '">' + (active ? 'Active' : 'Inactive') + '</span></td>' +
+          '<td>' + actions + '</td></tr>';
+      }
       return '<tr><td>' + r[keyField] + '</td>' +
-        '<td><span class="badge ' + (active ? 'green' : 'status-void') + '">' + (active ? 'Active' : 'Inactive') + '</span></td>' +
-        '<td><button class="secondary" data-key="' + r[keyField] + '" data-active="' + active + '">' +
-        (active ? 'Deactivate' : 'Activate') + '</button></td></tr>';
+        '<td><span class="tag ' + (active ? 'tag-accent' : 'tag-neutral') + '">' + (active ? 'Active' : 'Inactive') + '</span></td>' +
+        '<td>' + actions + '</td></tr>';
     }).join('');
 
+    var emptyColspan = isDailyReport ? 4 : 3;
+    var headerHtml = isDailyReport
+      ? '<th>' + keyField + '</th><th>Recipient Emails</th><th>Status</th><th></th>'
+      : '<th>' + keyField + '</th><th>Status</th><th></th>';
+
     document.getElementById('manageDataTable').innerHTML =
-      '<table class="data-table"><thead><tr><th>' + keyField + '</th>' +
-      '<th>Status</th><th></th></tr></thead><tbody>' + (body || '<tr><td colspan="3" class="muted">No records yet.</td></tr>') + '</tbody></table>';
+      '<table class="data-table"><thead><tr>' + headerHtml + '</tr></thead><tbody>' +
+      (body || '<tr><td colspan="' + emptyColspan + '" class="muted">No records yet.</td></tr>') + '</tbody></table>';
 
     document.querySelectorAll('#manageDataTable button[data-key]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var nowActive = btn.dataset.active === 'true';
+        var restore = self.setButtonBusy(btn, 'Working…');
         google.script.run
           .withSuccessHandler(function () { self.loadManageData(); })
-          .withFailureHandler(self.showFatalError)
+          .withFailureHandler(function (err) { restore(); self.showFatalError(err); })
           .api_manageDataSetActive(self.token, type, btn.dataset.key, !nowActive);
+      });
+    });
+
+    document.querySelectorAll('#manageDataTable button[data-edit]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        self.showManageDataAddDialog(type, btn.dataset.edit, function () { self.loadManageData(); });
       });
     });
   },
 
-  promptManageDataAdd: function (type, onDone) {
-    var keyField = this.keyFieldFor(type);
-    var name = prompt('New ' + keyField + ':');
-    if (!name) return;
-    var record = {};
-    record[keyField] = name;
-    google.script.run
-      .withSuccessHandler(onDone)
-      .withFailureHandler(this.showFatalError)
-      .api_manageDataSave(this.token, type, record);
-  },
-
-  // ---- Audit Log ----
+  // ---- Audit log ----
   loadAuditLog: function () {
     var self = this;
     google.script.run
       .withSuccessHandler(function (rows) {
         var body = rows.map(function (r) {
+          var actionTag = r.action === 'Void-Cancel' ? 'tag-danger' : r.action === 'Status Change' ? 'tag-outline' : 'tag-neutral';
           return '<tr><td>' + self.formatDate(r.timestamp) + '</td><td>' + r.user + '</td><td>' + (r.branch || '') +
-            '</td><td>' + r.recordRef + '</td><td>' + r.action + '</td><td>' + (r.fieldChanged || '') +
-            '</td><td>' + (r.oldValue || '') + ' → ' + (r.newValue || '') + '</td></tr>';
+            '</td><td>' + r.recordRef + '</td><td><span class="tag ' + actionTag + '">' + r.action + '</span></td><td>' + (r.fieldChanged || '') +
+            '</td><td>' + (r.oldValue || '—') + ' → ' + (r.newValue || '—') + '</td></tr>';
         }).join('');
         document.getElementById('auditLogTable').innerHTML =
-          '<table class="data-table"><thead><tr><th>Timestamp</th><th>User</th><th>Branch</th><th>Record Ref#</th><th>Action</th><th>Field</th><th>Change</th></tr></thead><tbody>' +
+          '<table class="data-table"><thead><tr><th>Timestamp</th><th>User</th><th>Branch</th><th>Record Ref#</th><th>Action</th><th>Field</th><th>Old → New</th></tr></thead><tbody>' +
           (body || '<tr><td colspan="7" class="muted">No entries yet.</td></tr>') + '</tbody></table>';
       })
       .withFailureHandler(this.showFatalError)
@@ -368,10 +1054,13 @@ var APP = {
     var self = this;
     google.script.run
       .withSuccessHandler(function (rows) {
+        var isAdminLike = self.isAdminLike();
         var body = rows.map(function (r) {
-          return '<tr><td>' + r.type + '</td><td>' + r.ref + '</td><td>' + r.client + '</td><td>' + r.status +
-            '</td><td>' + self.money(r.amount) + '</td><td>' + self.formatDate(r.date) +
-            '</td><td><button class="secondary" data-type="' + r.type + '" data-ref="' + r.ref + '">Void</button></td></tr>';
+          var statusTag = self.progressStatusClass(r.status);
+          return '<tr><td>' + (r.type === 'job' ? 'Job' : 'Top-up') + '</td><td>' + r.ref + '</td><td>' + r.client +
+            '</td><td><span class="status-text ' + statusTag + '">' + r.status + '</span></td>' +
+            '<td>' + self.money(r.amount) + '</td><td>' + self.formatDate(r.date) +
+            '</td><td>' + (isAdminLike ? '<button class="btn btn-danger blueprint" data-type="' + r.type + '" data-ref="' + r.ref + '"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Void</button>' : '') + '</td></tr>';
         }).join('');
         document.getElementById('manageErrorTable').innerHTML =
           '<table class="data-table"><thead><tr><th>Type</th><th>Ref#</th><th>Client</th><th>Status</th><th>Amount</th><th>Date</th><th></th></tr></thead><tbody>' +
@@ -379,19 +1068,26 @@ var APP = {
 
         document.querySelectorAll('#manageErrorTable button[data-ref]').forEach(function (btn) {
           btn.addEventListener('click', function () {
-            var reason = prompt('Reason for voiding ' + btn.dataset.ref + ':');
-            if (!reason) return;
-            if (btn.dataset.type === 'job') {
-              google.script.run
-                .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); })
-                .withFailureHandler(self.showFatalError)
-                .api_voidJob(self.token, btn.dataset.ref, reason);
-            } else {
-              google.script.run
-                .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); })
-                .withFailureHandler(self.showFatalError)
-                .api_voidTopUp(self.token, btn.dataset.ref, reason);
-            }
+            self.showDialog({
+              title: 'Void ' + btn.dataset.ref,
+              bodyHtml: 'The record is kept for audit but excluded from balance and forecast totals from this point on.',
+              fields: [{ name: 'reason', label: 'Reason', required: true }],
+              confirmLabel: 'Void record',
+              confirmClass: 'btn-danger',
+              onConfirm: function (values, dialog) {
+                if (btn.dataset.type === 'job') {
+                  google.script.run
+                    .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); dialog.onSuccess(); })
+                    .withFailureHandler(dialog.onError)
+                    .api_voidJob(self.token, btn.dataset.ref, values.reason);
+                } else {
+                  google.script.run
+                    .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); dialog.onSuccess(); })
+                    .withFailureHandler(dialog.onError)
+                    .api_voidTopUp(self.token, btn.dataset.ref, values.reason);
+                }
+              }
+            });
           });
         });
       })

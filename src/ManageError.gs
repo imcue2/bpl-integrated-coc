@@ -57,14 +57,14 @@ function voidTopUp(recordId, reason, actorName) {
 function listVoidableRecords_() {
   var jobs = listJobs_().filter(function (j) { return !j['Void']; }).map(function (j) {
     return {
-      type: 'job', ref: j['Job #'], client: j['Client Name'], status: j['Status'],
-      amount: j['Amount'], date: j['Registered Date']
+      type: 'job', ref: j['Job #'], client: j['Client Name'], status: jobProgressLabel_(j),
+      amount: toNumber_(j['Amount']), date: toIsoDateStr_(j['Registered Date'])
     };
   });
   var topups = listTopUps_().filter(function (t) { return !t['Void']; }).map(function (t) {
     return {
       type: 'topup', ref: t['RecordID'], client: t['Client Name'], status: 'Top-up',
-      amount: t['Amount'], date: t['Top-up Date']
+      amount: toNumber_(t['Amount']), date: toIsoDateStr_(t['Top-up Date'])
     };
   });
   return jobs.concat(topups).sort(function (a, b) { return new Date(b.date) - new Date(a.date); });
