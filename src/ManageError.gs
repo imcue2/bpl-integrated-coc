@@ -66,19 +66,25 @@ function voidTopUp(recordId, reason, actorName) {
  * `recordId` is what the Void action actually targets — `ref` is display
  * only (Job # for jobs; there's no shorter natural label for a top-up, so
  * it reuses RecordID). Two rows can show the same `ref` (see voidJob's
- * comment on duplicate Job #s) but never the same `recordId`.
+ * comment on duplicate Job #s) but never the same `recordId` — the extra
+ * fields below (registeredBy/compiledDate/dialupDate/vesselEta for jobs)
+ * exist specifically so two same-Ref# rows can be told apart at a glance
+ * instead of by RecordID.
  */
 function listVoidableRecords_() {
   var jobs = listJobs_().filter(function (j) { return !j['Void']; }).map(function (j) {
     return {
       type: 'job', recordId: j['RecordID'], ref: j['Job #'], client: j['Client Name'], status: jobProgressLabel_(j),
-      amount: toNumber_(j['Amount']), date: toIsoDateStr_(j['Registered Date'])
+      amount: toNumber_(j['Amount']), date: toIsoDateStr_(j['Registered Date']),
+      registeredBy: j['Registered By'] || '', vesselEta: toIsoDateStr_(j['Vessel ETA']), vesselName: j['Vessel Name'] || '',
+      compiledDate: toIsoDateStr_(j['Compiled Date']), dialupDate: toIsoDateStr_(j['Dialup Date']), iNumber: j['I Number'] || ''
     };
   });
   var topups = listTopUps_().filter(function (t) { return !t['Void']; }).map(function (t) {
     return {
       type: 'topup', recordId: t['RecordID'], ref: t['RecordID'], client: t['Client Name'], status: 'Top-up',
-      amount: toNumber_(t['Amount']), date: toIsoDateStr_(t['Top-up Date'])
+      amount: toNumber_(t['Amount']), date: toIsoDateStr_(t['Top-up Date']),
+      registeredBy: t['Created By'] || '', vesselEta: '', vesselName: '', compiledDate: '', dialupDate: '', iNumber: ''
     };
   });
   return jobs.concat(topups).sort(function (a, b) { return new Date(b.date) - new Date(a.date); });
