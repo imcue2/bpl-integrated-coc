@@ -73,12 +73,36 @@ function listAllJobs_(clientName, branchFilterFn, etaFrom, etaTo, iNumber, statu
   });
 }
 
-/** Trims `jobNumber` before comparing — stored Job # values are always trimmed (see registerJob), so an untrimmed lookup would otherwise silently miss a real match. */
+/**
+ * Finds the ACTIVE (non-void) row for `jobNumber`, or null. Trims before
+ * comparing — stored Job # values are always trimmed (see registerJob),
+ * so an untrimmed lookup would otherwise silently miss a real match.
+ *
+ * Deliberately ignores voided rows: a Job # can legitimately appear more
+ * than once in the sheet (a voided mis-registration, kept for audit,
+ * followed by a corrected re-registration under the same number) and
+ * every caller here — the duplicate check in registerJob(), and the
+ * branch-permission pre-checks in Code.gs for Dial-up/Job Update/Void —
+ * wants the one that's actually in play, not whichever happens to sit
+ * first in the sheet. Matching without this filter is exactly what let
+ * S00004598 get registered a third time: the check found the already-
+ * voided first attempt, saw Void=true, and let a genuine duplicate
+ * through even though an active row with the same number already existed.
+ */
 function findJobByNumber_(jobNumber) {
   var needle = String(jobNumber || '').trim();
   var jobs = listJobs_();
   for (var i = 0; i < jobs.length; i++) {
-    if (jobs[i]['Job #'] === needle) return jobs[i];
+    if (jobs[i]['Job #'] === needle && !jobs[i]['Void']) return jobs[i];
+  }
+  return null;
+}
+
+/** Finds a job row by its unique RecordID, void or not — the only reliable way to target one exact row when a Job # is (or was) duplicated. */
+function findJobByRecordId_(recordId) {
+  var jobs = listJobs_();
+  for (var i = 0; i < jobs.length; i++) {
+    if (jobs[i]['RecordID'] === recordId) return jobs[i];
   }
   return null;
 }
@@ -140,8 +164,10 @@ function registerJob(form, actorName, branch) {
   // active Job # through the app itself.
   var jobNumber = String(form.jobNumber || '').trim();
 
-  var existing = findJobByNumber_(jobNumber);
-  if (existing && !existing['Void']) {
+  // findJobByNumber_ only ever returns an active (non-void) row now, so
+  // finding anything here means a real duplicate — a voided prior attempt
+  // under the same number is not a match and does not block this.
+  if (findJobByNumber_(jobNumber)) {
     throw new Error('Job # "' + jobNumber + '" already exists.');
   }
 

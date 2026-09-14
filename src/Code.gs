@@ -236,14 +236,14 @@ function api_listVoidableRecords(token) {
   return listVoidableRecords_();
 }
 
-function api_voidJob(token, jobNumber, reason) {
+function api_voidJob(token, recordId, reason) {
   var ctx = requireAccess_(token);
   if (!isAdminLike_(ctx.access)) throw new Error('Manage Error is Admin-only.');
-  var job = findJobByNumber_(jobNumber);
+  var job = findJobByRecordId_(recordId);
   if (job && !branchAllowed_(ctx.access, job['Branch'])) {
     throw new Error('You do not have access to branch "' + job['Branch'] + '".');
   }
-  return voidJob(jobNumber, reason, actorName_(ctx.session));
+  return voidJob(recordId, reason, actorName_(ctx.session));
 }
 
 function api_voidTopUp(token, recordId, reason) {
