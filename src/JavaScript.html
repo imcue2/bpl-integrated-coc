@@ -394,6 +394,12 @@ var APP = {
     // Audit Log panel is Admin-like only — its filter won't exist for other roles.
     var auditRecordRefEl = document.getElementById('auditRecordRefFilter');
     if (auditRecordRefEl) auditRecordRefEl.addEventListener('change', function () { self.loadAuditLog(); });
+
+    // Manage Error panel is Admin-like only — its filter won't exist for other roles.
+    // Filters client-side against already-fetched rows, so 'input' (live, no round-trip)
+    // rather than 'change' (fires only on blur) is fine here.
+    var manageErrorFilterEl = document.getElementById('manageErrorJobNumberFilter');
+    if (manageErrorFilterEl) manageErrorFilterEl.addEventListener('input', function () { self.renderManageErrorTable(); });
   },
 
   // ---- Dashboard ----
@@ -1062,45 +1068,68 @@ var APP = {
     var self = this;
     google.script.run
       .withSuccessHandler(function (rows) {
-        var isAdminLike = self.isAdminLike();
-        var body = rows.map(function (r) {
-          var statusTag = self.progressStatusClass(r.status);
-          return '<tr><td>' + (r.type === 'job' ? 'Job' : 'Top-up') + '</td><td>' + r.ref + '</td><td>' + r.client +
-            '</td><td><span class="status-text ' + statusTag + '">' + r.status + '</span></td>' +
-            '<td>' + self.money(r.amount) + '</td><td>' + self.formatDate(r.date) +
-            '</td><td>' + (isAdminLike ? '<button class="btn btn-danger blueprint" data-type="' + r.type + '" data-ref="' + r.ref + '" data-record-id="' + r.recordId + '"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Void</button>' : '') + '</td></tr>';
-        }).join('');
-        document.getElementById('manageErrorTable').innerHTML =
-          '<table class="data-table"><thead><tr><th>Type</th><th>Ref#</th><th>Client</th><th>Status</th><th>Amount</th><th>Date</th><th></th></tr></thead><tbody>' +
-          (body || '<tr><td colspan="7" class="muted">Nothing to void.</td></tr>') + '</tbody></table>';
-
-        document.querySelectorAll('#manageErrorTable button[data-record-id]').forEach(function (btn) {
-          btn.addEventListener('click', function () {
-            self.showDialog({
-              title: 'Void ' + btn.dataset.ref,
-              bodyHtml: 'The record is kept for audit but excluded from balance and forecast totals from this point on.',
-              fields: [{ name: 'reason', label: 'Reason', required: true }],
-              confirmLabel: 'Void record',
-              confirmClass: 'btn-danger',
-              onConfirm: function (values, dialog) {
-                if (btn.dataset.type === 'job') {
-                  google.script.run
-                    .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); dialog.onSuccess(); })
-                    .withFailureHandler(dialog.onError)
-                    .api_voidJob(self.token, btn.dataset.recordId, values.reason);
-                } else {
-                  google.script.run
-                    .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); dialog.onSuccess(); })
-                    .withFailureHandler(dialog.onError)
-                    .api_voidTopUp(self.token, btn.dataset.recordId, values.reason);
-                }
-              }
-            });
-          });
-        });
+        self.manageErrorRows = rows;
+        self.renderManageErrorTable();
       })
       .withFailureHandler(this.showFatalError)
       .api_listVoidableRecords(this.token);
+  },
+
+  // Filtering is client-side against the already-fetched rows (no server
+  // round-trip per keystroke) — re-run whenever the fetch above completes
+  // or the Job/Ref# filter changes.
+  renderManageErrorTable: function () {
+    var self = this;
+    var rows = self.manageErrorRows || [];
+    var filterEl = document.getElementById('manageErrorJobNumberFilter');
+    var filter = filterEl ? filterEl.value.trim().toLowerCase() : '';
+    if (filter) {
+      rows = rows.filter(function (r) { return String(r.ref).toLowerCase().indexOf(filter) !== -1; });
+    }
+
+    var isAdminLike = self.isAdminLike();
+    var body = rows.map(function (r) {
+      var statusTag = self.progressStatusClass(r.status);
+      return '<tr><td>' + (r.type === 'job' ? 'Job' : 'Top-up') + '</td><td>' + r.ref + '</td><td>' + r.client +
+        '</td><td><span class="status-text ' + statusTag + '">' + r.status + '</span></td>' +
+        '<td>' + self.money(r.amount) + '</td><td>' + self.formatDate(r.date) + '</td>' +
+        '<td>' + (r.registeredBy || '—') + '</td>' +
+        '<td>' + (r.vesselEta ? self.formatDate(r.vesselEta) : '—') + '</td>' +
+        '<td>' + (r.vesselName || '—') + '</td>' +
+        '<td>' + (r.compiledDate ? self.formatDate(r.compiledDate) : '—') + '</td>' +
+        '<td>' + (r.dialupDate ? self.formatDate(r.dialupDate) : '—') + '</td>' +
+        '<td>' + (r.iNumber || '—') + '</td>' +
+        '<td>' + (isAdminLike ? '<button class="btn btn-danger blueprint" data-type="' + r.type + '" data-ref="' + r.ref + '" data-record-id="' + r.recordId + '"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Void</button>' : '') + '</td></tr>';
+    }).join('');
+    document.getElementById('manageErrorTable').innerHTML =
+      '<table class="data-table"><thead><tr><th>Type</th><th>Ref#</th><th>Client</th><th>Status</th><th>Amount</th><th>Date</th>' +
+      '<th>By</th><th>Vessel ETA</th><th>Vessel Name</th><th>Compiled</th><th>Dial-up</th><th>I Number</th><th></th></tr></thead><tbody>' +
+      (body || '<tr><td colspan="13" class="muted">Nothing to void.</td></tr>') + '</tbody></table>';
+
+    document.querySelectorAll('#manageErrorTable button[data-record-id]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        self.showDialog({
+          title: 'Void ' + btn.dataset.ref,
+          bodyHtml: 'The record is kept for audit but excluded from balance and forecast totals from this point on.',
+          fields: [{ name: 'reason', label: 'Reason', required: true }],
+          confirmLabel: 'Void record',
+          confirmClass: 'btn-danger',
+          onConfirm: function (values, dialog) {
+            if (btn.dataset.type === 'job') {
+              google.script.run
+                .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); dialog.onSuccess(); })
+                .withFailureHandler(dialog.onError)
+                .api_voidJob(self.token, btn.dataset.recordId, values.reason);
+            } else {
+              google.script.run
+                .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); dialog.onSuccess(); })
+                .withFailureHandler(dialog.onError)
+                .api_voidTopUp(self.token, btn.dataset.recordId, values.reason);
+            }
+          }
+        });
+      });
+    });
   }
 };
 </script>
