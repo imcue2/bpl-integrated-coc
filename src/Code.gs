@@ -113,9 +113,9 @@ function api_getForecastByJob(token, clientName, iNumber, status) {
   return getForecastByJob_(clientName, branchFilterFor_(ctx.access), iNumber, status);
 }
 
-function api_getAllJobs(token, clientName, etaFrom, etaTo, iNumber, status) {
+function api_getAllJobs(token, clientName, etaFrom, etaTo, iNumber, status, jobNumber) {
   var ctx = requireAccess_(token);
-  return listAllJobs_(clientName, branchFilterFor_(ctx.access), etaFrom, etaTo, iNumber, status);
+  return listAllJobs_(clientName, branchFilterFor_(ctx.access), etaFrom, etaTo, iNumber, status, jobNumber);
 }
 
 function api_getKpi(token, year, month, clientName, registeredBy) {

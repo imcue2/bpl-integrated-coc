@@ -160,6 +160,13 @@ function matchesINumber_(job, needle) {
   return String(job['I Number']).toLowerCase().indexOf(String(needle).toLowerCase()) !== -1;
 }
 
+/** Case-insensitive substring match of `needle` against job['Job #'] — blank needle always matches (no filter applied). */
+function matchesJobNumber_(job, needle) {
+  if (!needle) return true;
+  if (!job['Job #']) return false;
+  return String(job['Job #']).toLowerCase().indexOf(String(needle).toLowerCase()) !== -1;
+}
+
 /** ETA less 2 days, formatted — used for the Dashboard "Request Amount" card. */
 function requestByDate_(eta) {
   var date = (eta instanceof Date) ? new Date(eta.getTime()) : new Date(eta);

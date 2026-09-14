@@ -388,6 +388,10 @@
           <select id="allJobsClientFilter"></select>
         </div>
         <div class="field">
+          <label for="allJobsJobNumberFilter">Job #</label>
+          <input type="text" id="allJobsJobNumberFilter" placeholder="Search Job #">
+        </div>
+        <div class="field">
           <label for="allJobsINumberFilter">I Number</label>
           <input type="text" id="allJobsINumberFilter" placeholder="Search I Number">
         </div>
@@ -404,6 +408,10 @@
     <!-- ============ Reports > Audit log ============ -->
     <section class="panel subpanel" data-group="reports" data-tab="audit">
       <div class="toolbar">
+        <div class="field">
+          <label for="auditRecordRefFilter">Job / Record #</label>
+          <input type="text" id="auditRecordRefFilter" placeholder="Search Job / Record #">
+        </div>
         <button class="btn btn-secondary blueprint no-print" onclick="window.print()"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Print to PDF</button>
       </div>
       <div id="auditLogTable"></div>
