@@ -73,10 +73,12 @@ function listAllJobs_(clientName, branchFilterFn, etaFrom, etaTo, iNumber, statu
   });
 }
 
+/** Trims `jobNumber` before comparing — stored Job # values are always trimmed (see registerJob), so an untrimmed lookup would otherwise silently miss a real match. */
 function findJobByNumber_(jobNumber) {
+  var needle = String(jobNumber || '').trim();
   var jobs = listJobs_();
   for (var i = 0; i < jobs.length; i++) {
-    if (jobs[i]['Job #'] === jobNumber) return jobs[i];
+    if (jobs[i]['Job #'] === needle) return jobs[i];
   }
   return null;
 }
@@ -130,14 +132,22 @@ function jobProgressLabel_(job) {
 function registerJob(form, actorName, branch) {
   validateJobNumber_(form.jobNumber, form.shipmentType);
 
-  var existing = findJobByNumber_(form.jobNumber);
+  // Trim once and reuse everywhere below — validateJobNumber_ only checks
+  // a local trimmed copy, so without this a job number with stray
+  // whitespace (e.g. " S00004598") would validate fine, dodge the
+  // duplicate check against the already-trimmed stored value, and then
+  // get stored trimmed anyway, silently creating an exact-duplicate
+  // active Job # through the app itself.
+  var jobNumber = String(form.jobNumber || '').trim();
+
+  var existing = findJobByNumber_(jobNumber);
   if (existing && !existing['Void']) {
-    throw new Error('Job # "' + form.jobNumber + '" already exists.');
+    throw new Error('Job # "' + jobNumber + '" already exists.');
   }
 
   var record = {
     'RecordID': generateId_(),
-    'Job #': String(form.jobNumber).trim(),
+    'Job #': jobNumber,
     'Client Name': form.clientName,
     'Vessel ETA': form.vesselEta,
     'Vessel Name': form.vesselName,

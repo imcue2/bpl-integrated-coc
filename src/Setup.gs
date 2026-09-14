@@ -191,6 +191,55 @@ function debugApiCalls() {
   }
 }
 
+/**
+ * One-time cleanup — run once from the Apps Script editor (Run menu),
+ * then delete this function. Removes the specific duplicate S00004598
+ * row created by a direct spreadsheet edit (see the Audit Log gap: this
+ * RecordID has zero audit entries, unlike a job entered through Register
+ * Job) — it was voided "Incorrect Port" on 2026-09-02 and superseded by
+ * a second S00004598 row (RecordID 1d8dae84...) that is Dialled-up with
+ * all three completion refs filled in and already correctly excluded
+ * from the Forecast reports. That second row is untouched by this.
+ *
+ * Hardcoded to this exact RecordID + Void=true on purpose, so this can
+ * never delete anything other than the one row it was written for, even
+ * if run again later after other data has changed.
+ */
+function removeS00004598DuplicateVoidedRow() {
+  var TARGET_RECORD_ID = 'b98af07b-49fd-4ad1-97b8-beef937c7bdd';
+  var TARGET_JOB_NUMBER = 'S00004598';
+
+  var sheet = getCocSpreadsheet_().getSheetByName(CONFIG.SHEETS.JOBS);
+  var rows = sheetToObjects_(sheet);
+
+  var target = null;
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i]['RecordID'] === TARGET_RECORD_ID) { target = rows[i]; break; }
+  }
+
+  if (!target) {
+    Logger.log('Nothing to do — RecordID ' + TARGET_RECORD_ID + ' not found (already removed?).');
+    return;
+  }
+  if (target['Job #'] !== TARGET_JOB_NUMBER || !target['Void']) {
+    throw new Error(
+      'Refusing to delete row ' + target.__row + ': expected Job # ' + TARGET_JOB_NUMBER +
+      ' with Void=true, found Job # ' + target['Job #'] + ' Void=' + target['Void'] +
+      '. Data has changed since this cleanup was written — investigate before deleting.'
+    );
+  }
+
+  sheet.deleteRow(target.__row);
+
+  logAudit_({
+    user: 'Setup.gs cleanup', recordRef: TARGET_JOB_NUMBER,
+    action: CONFIG.ACTIONS.VOID_CANCEL, fieldChanged: 'Row deleted (duplicate cleanup)',
+    oldValue: formatCurrency_(target['Amount']) + ' / Void: ' + target['Void Reason'], newValue: 'Deleted'
+  });
+
+  Logger.log('Deleted duplicate ' + TARGET_JOB_NUMBER + ' row (RecordID ' + TARGET_RECORD_ID + ').');
+}
+
 function ensureSheet_(ss, name, headers) {
   var sheet = ss.getSheetByName(name);
   if (!sheet) {
