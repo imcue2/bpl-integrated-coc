@@ -387,9 +387,13 @@ var APP = {
     });
 
     fillSelect(document.getElementById('allJobsStatusFilter'), ['Registered', 'Compiled', 'Dialled-up', 'Completed'], 'All');
-    document.querySelectorAll('#allJobsClientFilter, #allJobsDateFrom, #allJobsDateTo, #allJobsINumberFilter, #allJobsStatusFilter').forEach(function (el) {
+    document.querySelectorAll('#allJobsClientFilter, #allJobsDateFrom, #allJobsDateTo, #allJobsJobNumberFilter, #allJobsINumberFilter, #allJobsStatusFilter').forEach(function (el) {
       el.addEventListener('change', function () { self.loadAllJobs(); });
     });
+
+    // Audit Log panel is Admin-like only — its filter won't exist for other roles.
+    var auditRecordRefEl = document.getElementById('auditRecordRefFilter');
+    if (auditRecordRefEl) auditRecordRefEl.addEventListener('change', function () { self.loadAuditLog(); });
   },
 
   // ---- Dashboard ----
@@ -551,6 +555,7 @@ var APP = {
     var clientName = document.getElementById('allJobsClientFilter').value;
     var etaFrom = document.getElementById('allJobsDateFrom').value;
     var etaTo = document.getElementById('allJobsDateTo').value;
+    var jobNumber = document.getElementById('allJobsJobNumberFilter').value;
     var iNumber = document.getElementById('allJobsINumberFilter').value;
     var status = document.getElementById('allJobsStatusFilter').value;
     document.getElementById('allJobsTable').innerHTML = '<p class="muted">Loading…</p>';
@@ -559,11 +564,12 @@ var APP = {
         document.getElementById('allJobsTable').innerHTML = self.renderAllJobsTable(rows);
       })
       .withFailureHandler(this.showFatalError)
-      .api_getAllJobs(this.token, clientName || '', etaFrom || '', etaTo || '', iNumber || '', status || '');
+      .api_getAllJobs(this.token, clientName || '', etaFrom || '', etaTo || '', iNumber || '', status || '', jobNumber || '');
   },
 
   showAllJobsPlaceholder: function () {
     document.getElementById('allJobsClientFilter').value = '';
+    document.getElementById('allJobsJobNumberFilter').value = '';
     document.getElementById('allJobsINumberFilter').value = '';
     document.getElementById('allJobsStatusFilter').value = '';
     document.getElementById('allJobsDateFrom').value = '';
@@ -1033,6 +1039,8 @@ var APP = {
   // ---- Audit log ----
   loadAuditLog: function () {
     var self = this;
+    var recordRefEl = document.getElementById('auditRecordRefFilter');
+    var recordRef = recordRefEl ? recordRefEl.value : '';
     google.script.run
       .withSuccessHandler(function (rows) {
         var body = rows.map(function (r) {
@@ -1046,7 +1054,7 @@ var APP = {
           (body || '<tr><td colspan="7" class="muted">No entries yet.</td></tr>') + '</tbody></table>';
       })
       .withFailureHandler(this.showFatalError)
-      .api_getAuditLog(this.token, {});
+      .api_getAuditLog(this.token, recordRef ? { recordRef: recordRef } : {});
   },
 
   // ---- Manage Error ----

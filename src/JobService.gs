@@ -32,15 +32,17 @@ function listTopUps_() {
  * Reports > All Jobs: every non-void job regardless of status, ETA
  * ascending. etaFrom/etaTo are inclusive "yyyy-MM-dd" bounds (matching
  * an HTML date input) — either or both may be blank for an open range.
- * iNumber is a case-insensitive substring search, blank = no filter.
- * Defaults to blank on the client so the tab never auto-loads every job.
+ * iNumber and jobNumber are each a case-insensitive substring search,
+ * blank = no filter. Defaults to blank on the client so the tab never
+ * auto-loads every job.
  */
-function listAllJobs_(clientName, branchFilterFn, etaFrom, etaTo, iNumber, status) {
+function listAllJobs_(clientName, branchFilterFn, etaFrom, etaTo, iNumber, status, jobNumber) {
   var jobs = listJobs_().filter(function (j) {
     if (j['Void']) return false;
     if (clientName && j['Client Name'] !== clientName) return false;
     if (branchFilterFn && !branchFilterFn(j['Branch'])) return false;
     if (!matchesINumber_(j, iNumber)) return false;
+    if (!matchesJobNumber_(j, jobNumber)) return false;
     if (status && jobProgressLabel_(j) !== status) return false;
     var eta = toIsoDateStr_(j['Vessel ETA']);
     if (etaFrom && eta < etaFrom) return false;
