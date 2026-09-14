@@ -1068,13 +1068,13 @@ var APP = {
           return '<tr><td>' + (r.type === 'job' ? 'Job' : 'Top-up') + '</td><td>' + r.ref + '</td><td>' + r.client +
             '</td><td><span class="status-text ' + statusTag + '">' + r.status + '</span></td>' +
             '<td>' + self.money(r.amount) + '</td><td>' + self.formatDate(r.date) +
-            '</td><td>' + (isAdminLike ? '<button class="btn btn-danger blueprint" data-type="' + r.type + '" data-ref="' + r.ref + '"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Void</button>' : '') + '</td></tr>';
+            '</td><td>' + (isAdminLike ? '<button class="btn btn-danger blueprint" data-type="' + r.type + '" data-ref="' + r.ref + '" data-record-id="' + r.recordId + '"><i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>Void</button>' : '') + '</td></tr>';
         }).join('');
         document.getElementById('manageErrorTable').innerHTML =
           '<table class="data-table"><thead><tr><th>Type</th><th>Ref#</th><th>Client</th><th>Status</th><th>Amount</th><th>Date</th><th></th></tr></thead><tbody>' +
           (body || '<tr><td colspan="7" class="muted">Nothing to void.</td></tr>') + '</tbody></table>';
 
-        document.querySelectorAll('#manageErrorTable button[data-ref]').forEach(function (btn) {
+        document.querySelectorAll('#manageErrorTable button[data-record-id]').forEach(function (btn) {
           btn.addEventListener('click', function () {
             self.showDialog({
               title: 'Void ' + btn.dataset.ref,
@@ -1087,12 +1087,12 @@ var APP = {
                   google.script.run
                     .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); self.loadForecastEta(); self.loadForecastJob(); dialog.onSuccess(); })
                     .withFailureHandler(dialog.onError)
-                    .api_voidJob(self.token, btn.dataset.ref, values.reason);
+                    .api_voidJob(self.token, btn.dataset.recordId, values.reason);
                 } else {
                   google.script.run
                     .withSuccessHandler(function () { self.loadManageError(); self.loadDashboard(); dialog.onSuccess(); })
                     .withFailureHandler(dialog.onError)
-                    .api_voidTopUp(self.token, btn.dataset.ref, values.reason);
+                    .api_voidTopUp(self.token, btn.dataset.recordId, values.reason);
                 }
               }
             });

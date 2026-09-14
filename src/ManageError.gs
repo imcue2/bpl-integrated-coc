@@ -5,13 +5,21 @@
  * Access-gated in Code.gs via isAdminLike_(access) before these run.
  */
 
-function voidJob(jobNumber, reason, actorName) {
+/**
+ * Voids by RecordID, not Job # — a Job # is not guaranteed unique across
+ * rows (a voided mis-registration and its corrected re-registration can
+ * legitimately share one, and a bug once let two *active* rows share one
+ * too — see findJobByNumber_'s comment). Matching by Job # here would
+ * resolve to whichever row happens to come first in the sheet, which is
+ * not necessarily the one the caller actually selected.
+ */
+function voidJob(recordId, reason, actorName) {
   var sheet = getCocSpreadsheet_().getSheetByName(CONFIG.SHEETS.JOBS);
   var jobs = sheetToObjects_(sheet);
   for (var i = 0; i < jobs.length; i++) {
-    if (jobs[i]['Job #'] === jobNumber) {
+    if (jobs[i]['RecordID'] === recordId) {
       var job = jobs[i];
-      if (job['Void']) throw new Error('Job # "' + jobNumber + '" is already void.');
+      if (job['Void']) throw new Error('Job # "' + job['Job #'] + '" is already void.');
       job['Void'] = true;
       job['Void Reason'] = reason || '';
       job['Void Date'] = nowIso_();
@@ -19,14 +27,14 @@ function voidJob(jobNumber, reason, actorName) {
       writeObjectRow_(sheet, job.__row, job);
 
       logAudit_({
-        user: actorName, branch: job['Branch'], recordRef: jobNumber,
+        user: actorName, branch: job['Branch'], recordRef: job['Job #'],
         action: CONFIG.ACTIONS.VOID_CANCEL, fieldChanged: 'Status',
         oldValue: job['Status'], newValue: 'Void (' + reason + ')'
       });
       return { status: 'OK' };
     }
   }
-  throw new Error('Job # "' + jobNumber + '" not found.');
+  throw new Error('Record not found.');
 }
 
 function voidTopUp(recordId, reason, actorName) {
@@ -53,17 +61,23 @@ function voidTopUp(recordId, reason, actorName) {
   throw new Error('Top-up record not found.');
 }
 
-/** Feeds the Manage Error screen: all voidable (non-void) jobs + top-ups. */
+/**
+ * Feeds the Manage Error screen: all voidable (non-void) jobs + top-ups.
+ * `recordId` is what the Void action actually targets — `ref` is display
+ * only (Job # for jobs; there's no shorter natural label for a top-up, so
+ * it reuses RecordID). Two rows can show the same `ref` (see voidJob's
+ * comment on duplicate Job #s) but never the same `recordId`.
+ */
 function listVoidableRecords_() {
   var jobs = listJobs_().filter(function (j) { return !j['Void']; }).map(function (j) {
     return {
-      type: 'job', ref: j['Job #'], client: j['Client Name'], status: jobProgressLabel_(j),
+      type: 'job', recordId: j['RecordID'], ref: j['Job #'], client: j['Client Name'], status: jobProgressLabel_(j),
       amount: toNumber_(j['Amount']), date: toIsoDateStr_(j['Registered Date'])
     };
   });
   var topups = listTopUps_().filter(function (t) { return !t['Void']; }).map(function (t) {
     return {
-      type: 'topup', ref: t['RecordID'], client: t['Client Name'], status: 'Top-up',
+      type: 'topup', recordId: t['RecordID'], ref: t['RecordID'], client: t['Client Name'], status: 'Top-up',
       amount: toNumber_(t['Amount']), date: toIsoDateStr_(t['Top-up Date'])
     };
   });
