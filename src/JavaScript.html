@@ -442,7 +442,7 @@ var APP = {
     cardsHtml += '</div>';
 
     document.getElementById('dashboardCards').innerHTML = cardsHtml;
-    document.getElementById('dashboardJobTable').innerHTML = this.renderJobTable(data.forecastByJob);
+    document.getElementById('dashboardJobTable').innerHTML = this.renderJobTable(data.forecastByJob, true);
     document.getElementById('dashboardEtaTable').innerHTML = this.renderEtaTable(data.forecastByEta);
   },
 
@@ -536,19 +536,28 @@ var APP = {
       .api_getForecastByJob(this.token, clientName || '', iNumber || '', status || '');
   },
 
-  renderJobTable: function (rows) {
+  // `showRegisteredDate`: Dashboard's "Forecast by Job — preview" wants a
+  // Registration Date column right after Status; Reports > Forecast by
+  // Jobs (the other caller) doesn't, so it stays opt-in rather than
+  // changing the shared table for both.
+  renderJobTable: function (rows, showRegisteredDate) {
     if (!rows.length) return '<p class="muted">No forecasted jobs.</p>';
     var total = rows.reduce(function (sum, r) { return sum + (Number(r.amount) || 0); }, 0);
+    var colCount = showRegisteredDate ? 8 : 7;
     var body = rows.map(function (r) {
       var progressTag = '<span class="status-text ' + APP.progressStatusClass(r.progress) + '">' + r.progress + '</span>';
-      return '<tr><td>' + APP.formatDate(r.vesselEta) + '</td><td>' + progressTag + '</td><td>' + r.jobNumber +
+      return '<tr><td>' + APP.formatDate(r.vesselEta) + '</td><td>' + progressTag + '</td>' +
+        (showRegisteredDate ? '<td>' + APP.formatDate(r.registeredDate) + '</td>' : '') +
+        '<td>' + r.jobNumber +
         '</td><td>' + (r.shipmentType || '') + '</td><td>' + r.vesselName + '</td><td>' + r.port +
         '</td><td>' + (r.remarks || '—') + '</td>' +
         '<td class="amount-cell' + (r.color === 'red' ? ' danger' : '') + '">' + APP.money(r.amount) + '</td></tr>';
     }).join('');
     body += '<tr style="font-weight:700;border-top:2px solid var(--color-divider);">' +
-      '<td colspan="7" style="text-align:right;">Total</td><td class="amount-cell">' + APP.money(total) + '</td></tr>';
-    return '<table class="data-table"><thead><tr><th>Vessel ETA</th><th>Status</th><th>Job #</th><th>Shipment Type</th><th>Vessel Name</th><th>Port</th><th>Remarks</th><th>Amount</th></tr></thead><tbody>' + body + '</tbody></table>';
+      '<td colspan="' + colCount + '" style="text-align:right;">Total</td><td class="amount-cell">' + APP.money(total) + '</td></tr>';
+    return '<table class="data-table"><thead><tr><th>Vessel ETA</th><th>Status</th>' +
+      (showRegisteredDate ? '<th>Registration Date</th>' : '') +
+      '<th>Job #</th><th>Shipment Type</th><th>Vessel Name</th><th>Port</th><th>Remarks</th><th>Amount</th></tr></thead><tbody>' + body + '</tbody></table>';
   },
 
   // ---- All Jobs ----
