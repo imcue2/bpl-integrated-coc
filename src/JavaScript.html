@@ -8,6 +8,13 @@ var APP = {
   hubUrl: null,
   bootstrap: null,
   assessmentLaneCategoryRules: {},
+  // Stale-response guards for the filtered report tables (see
+  // loadForecastEta's comment) — must start at a real number, not
+  // undefined, or the first ++ produces NaN and NaN !== NaN discards
+  // every response forever.
+  _etaReqId: 0,
+  _jobReqId: 0,
+  _allJobsReqId: 0,
 
   init: function () {
     this.bindTabs();
@@ -323,6 +330,11 @@ var APP = {
     document.querySelectorAll('#dashboardClientFilter, #etaClientFilter, #jobClientFilter, #allJobsClientFilter').forEach(function (sel) {
       fillSelect(sel, data.clients, 'All Clients');
     });
+    document.querySelectorAll('#etaPortFilter, #jobPortFilter, #allJobsPortFilter').forEach(function (sel) {
+      fillSelect(sel, data.ports, 'All Ports');
+    });
+    var jobRegisteredBySel = document.getElementById('jobRegisteredByFilter');
+    if (jobRegisteredBySel) fillSelect(jobRegisteredBySel, data.kpiRegisteredByUsers || [], 'All Users');
     var registerClientSel = document.querySelector('#registerJobForm select[name="clientName"]');
     if (registerClientSel) fillSelect(registerClientSel, data.clients);
     var topUpClientSel = document.querySelector('#topUpForm select[name="clientName"]');
@@ -375,19 +387,19 @@ var APP = {
     document.getElementById('dashboardClientFilter').addEventListener('change', function () {
       self.loadDashboard(this.value);
     });
-    document.querySelectorAll('#etaClientFilter, #etaINumberFilter').forEach(function (el) {
+    document.querySelectorAll('#etaClientFilter, #etaINumberFilter, #etaPortFilter').forEach(function (el) {
       el.addEventListener('change', function () { self.loadForecastEta(); });
     });
 
     // Forecast by Jobs never shows Completed jobs (activeForecastJobs_ already
     // excludes them), so that's not offered as a Status option here.
     fillSelect(document.getElementById('jobStatusFilter'), ['Registered', 'Compiled', 'Dialled-up'], 'All');
-    document.querySelectorAll('#jobClientFilter, #jobINumberFilter, #jobStatusFilter').forEach(function (el) {
+    document.querySelectorAll('#jobClientFilter, #jobINumberFilter, #jobStatusFilter, #jobPortFilter, #jobRegisteredByFilter').forEach(function (el) {
       el.addEventListener('change', function () { self.loadForecastJob(); });
     });
 
     fillSelect(document.getElementById('allJobsStatusFilter'), ['Registered', 'Compiled', 'Dialled-up', 'Completed'], 'All');
-    document.querySelectorAll('#allJobsClientFilter, #allJobsDateFrom, #allJobsDateTo, #allJobsJobNumberFilter, #allJobsINumberFilter, #allJobsStatusFilter').forEach(function (el) {
+    document.querySelectorAll('#allJobsClientFilter, #allJobsDateFrom, #allJobsDateTo, #allJobsJobNumberFilter, #allJobsINumberFilter, #allJobsStatusFilter, #allJobsPortFilter').forEach(function (el) {
       el.addEventListener('change', function () { self.loadAllJobs(); });
     });
 
@@ -500,12 +512,20 @@ var APP = {
     var self = this;
     var clientName = document.getElementById('etaClientFilter').value;
     var iNumber = document.getElementById('etaINumberFilter').value;
+    var port = document.getElementById('etaPortFilter').value;
+    // Stale-response guard: changing two filters in quick succession fires
+    // two overlapping google.script.run calls, and Apps Script gives no
+    // ordering guarantee on which resolves first — without this, whichever
+    // response lands LAST wins the render, even if it was requested first,
+    // silently showing results that don't match the filters now selected.
+    var reqId = ++self._etaReqId;
     google.script.run
       .withSuccessHandler(function (rows) {
+        if (reqId !== self._etaReqId) return; // a newer request is already in flight/rendered
         document.getElementById('forecastEtaTable').innerHTML = self.renderEtaTable(rows);
       })
       .withFailureHandler(this.showFatalError)
-      .api_getForecastByEta(this.token, clientName || '', iNumber || '');
+      .api_getForecastByEta(this.token, clientName || '', iNumber || '', port || '');
   },
 
   renderEtaTable: function (rows) {
@@ -528,12 +548,19 @@ var APP = {
     var clientName = document.getElementById('jobClientFilter').value;
     var iNumber = document.getElementById('jobINumberFilter').value;
     var status = document.getElementById('jobStatusFilter').value;
+    var port = document.getElementById('jobPortFilter').value;
+    var registeredBy = document.getElementById('jobRegisteredByFilter').value;
+    // Stale-response guard — see loadForecastEta's comment; this is the
+    // table this bug was actually reported on (Status filter showing
+    // results from a since-superseded request).
+    var reqId = ++self._jobReqId;
     google.script.run
       .withSuccessHandler(function (rows) {
+        if (reqId !== self._jobReqId) return;
         document.getElementById('forecastJobTable').innerHTML = self.renderJobTable(rows);
       })
       .withFailureHandler(this.showFatalError)
-      .api_getForecastByJob(this.token, clientName || '', iNumber || '', status || '');
+      .api_getForecastByJob(this.token, clientName || '', iNumber || '', status || '', port || '', registeredBy || '');
   },
 
   // `showRegisteredDate`: Dashboard's "Forecast by Job — preview" wants a
@@ -573,13 +600,17 @@ var APP = {
     var jobNumber = document.getElementById('allJobsJobNumberFilter').value;
     var iNumber = document.getElementById('allJobsINumberFilter').value;
     var status = document.getElementById('allJobsStatusFilter').value;
+    var port = document.getElementById('allJobsPortFilter').value;
     document.getElementById('allJobsTable').innerHTML = '<p class="muted">Loading…</p>';
+    // Stale-response guard — see loadForecastEta's comment.
+    var reqId = ++self._allJobsReqId;
     google.script.run
       .withSuccessHandler(function (rows) {
+        if (reqId !== self._allJobsReqId) return;
         document.getElementById('allJobsTable').innerHTML = self.renderAllJobsTable(rows);
       })
       .withFailureHandler(this.showFatalError)
-      .api_getAllJobs(this.token, clientName || '', etaFrom || '', etaTo || '', iNumber || '', status || '', jobNumber || '');
+      .api_getAllJobs(this.token, clientName || '', etaFrom || '', etaTo || '', iNumber || '', status || '', jobNumber || '', port || '');
   },
 
   showAllJobsPlaceholder: function () {
@@ -587,6 +618,7 @@ var APP = {
     document.getElementById('allJobsJobNumberFilter').value = '';
     document.getElementById('allJobsINumberFilter').value = '';
     document.getElementById('allJobsStatusFilter').value = '';
+    document.getElementById('allJobsPortFilter').value = '';
     document.getElementById('allJobsDateFrom').value = '';
     document.getElementById('allJobsDateTo').value = '';
     document.getElementById('allJobsTable').innerHTML =

@@ -33,14 +33,15 @@ function listTopUps_() {
  * ascending. etaFrom/etaTo are inclusive "yyyy-MM-dd" bounds (matching
  * an HTML date input) — either or both may be blank for an open range.
  * iNumber and jobNumber are each a case-insensitive substring search,
- * blank = no filter. Defaults to blank on the client so the tab never
- * auto-loads every job.
+ * blank = no filter. port is an exact match, blank = no filter.
+ * Defaults to blank on the client so the tab never auto-loads every job.
  */
-function listAllJobs_(clientName, branchFilterFn, etaFrom, etaTo, iNumber, status, jobNumber) {
+function listAllJobs_(clientName, branchFilterFn, etaFrom, etaTo, iNumber, status, jobNumber, port) {
   var jobs = listJobs_().filter(function (j) {
     if (j['Void']) return false;
     if (clientName && j['Client Name'] !== clientName) return false;
     if (branchFilterFn && !branchFilterFn(j['Branch'])) return false;
+    if (port && j['Port'] !== port) return false;
     if (!matchesINumber_(j, iNumber)) return false;
     if (!matchesJobNumber_(j, jobNumber)) return false;
     if (status && jobProgressLabel_(j) !== status) return false;
@@ -482,13 +483,15 @@ function applyCascade_(clientName, rows) {
  * still count toward the outstanding Forecast total and stay listed,
  * per the confirmed rule that Completed (not Dial-up) is what actually
  * removes a job from these reports. iNumber is a case-insensitive
- * substring search, blank = no filter.
+ * substring search, blank = no filter. port is an exact match, blank =
+ * no filter.
  */
-function activeForecastJobs_(clientName, branchFilterFn, iNumber) {
+function activeForecastJobs_(clientName, branchFilterFn, iNumber, port) {
   var jobs = listJobs_().filter(function (j) {
     return !j['Void'] && !isJobCompleted_(j) &&
       (!clientName || j['Client Name'] === clientName) &&
       (!branchFilterFn || branchFilterFn(j['Branch'])) &&
+      (!port || j['Port'] === port) &&
       matchesINumber_(j, iNumber);
   });
   jobs.sort(function (a, b) {
@@ -501,12 +504,14 @@ function activeForecastJobs_(clientName, branchFilterFn, iNumber) {
  * "Forecast by Job" table: one row per job, cascaded per-client. status
  * filters by the computed progress label (Registered/Compiled/
  * Dialled-up — Completed never appears here since it's already excluded
- * by activeForecastJobs_), blank = no filter. Not applied to
+ * by activeForecastJobs_), blank = no filter. registeredBy is an exact
+ * match against Registered By, blank = no filter. Not applied to
  * getForecastByEta_, which aggregates multiple jobs per row.
  */
-function getForecastByJob_(clientName, branchFilterFn, iNumber, status) {
-  var jobs = activeForecastJobs_(clientName, branchFilterFn, iNumber);
+function getForecastByJob_(clientName, branchFilterFn, iNumber, status, port, registeredBy) {
+  var jobs = activeForecastJobs_(clientName, branchFilterFn, iNumber, port);
   if (status) jobs = jobs.filter(function (j) { return jobProgressLabel_(j) === status; });
+  if (registeredBy) jobs = jobs.filter(function (j) { return j['Registered By'] === registeredBy; });
   var byClient = {};
   jobs.forEach(function (j) {
     var key = j['Client Name'];
@@ -537,9 +542,9 @@ function getForecastByJob_(clientName, branchFilterFn, iNumber, status) {
   return out;
 }
 
-/** "Forecast by ETA" table: jobs with the same ETA (+ client) consolidated into one row. */
-function getForecastByEta_(clientName, branchFilterFn, iNumber) {
-  var jobs = activeForecastJobs_(clientName, branchFilterFn, iNumber);
+/** "Forecast by ETA" table: jobs with the same ETA (+ client) consolidated into one row. port is an exact match, blank = no filter. */
+function getForecastByEta_(clientName, branchFilterFn, iNumber, port) {
+  var jobs = activeForecastJobs_(clientName, branchFilterFn, iNumber, port);
   var byClient = {};
   jobs.forEach(function (j) {
     var key = j['Client Name'];
