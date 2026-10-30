@@ -103,19 +103,19 @@ function api_getDashboard(token, clientName) {
   return getDashboardData(clientName, ctx.access);
 }
 
-function api_getForecastByEta(token, clientName, iNumber) {
+function api_getForecastByEta(token, clientName, iNumber, port) {
   var ctx = requireAccess_(token);
-  return getForecastByEta_(clientName, branchFilterFor_(ctx.access), iNumber);
+  return getForecastByEta_(clientName, branchFilterFor_(ctx.access), iNumber, port);
 }
 
-function api_getForecastByJob(token, clientName, iNumber, status) {
+function api_getForecastByJob(token, clientName, iNumber, status, port, registeredBy) {
   var ctx = requireAccess_(token);
-  return getForecastByJob_(clientName, branchFilterFor_(ctx.access), iNumber, status);
+  return getForecastByJob_(clientName, branchFilterFor_(ctx.access), iNumber, status, port, registeredBy);
 }
 
-function api_getAllJobs(token, clientName, etaFrom, etaTo, iNumber, status, jobNumber) {
+function api_getAllJobs(token, clientName, etaFrom, etaTo, iNumber, status, jobNumber, port) {
   var ctx = requireAccess_(token);
-  return listAllJobs_(clientName, branchFilterFor_(ctx.access), etaFrom, etaTo, iNumber, status, jobNumber);
+  return listAllJobs_(clientName, branchFilterFor_(ctx.access), etaFrom, etaTo, iNumber, status, jobNumber, port);
 }
 
 function api_getKpi(token, year, month, clientName, registeredBy) {
