@@ -399,7 +399,7 @@ var APP = {
     });
 
     fillSelect(document.getElementById('allJobsStatusFilter'), ['Registered', 'Compiled', 'Dialled-up', 'Completed'], 'All');
-    document.querySelectorAll('#allJobsClientFilter, #allJobsDateFrom, #allJobsDateTo, #allJobsJobNumberFilter, #allJobsINumberFilter, #allJobsStatusFilter, #allJobsPortFilter').forEach(function (el) {
+    document.querySelectorAll('#allJobsClientFilter, #allJobsDateFrom, #allJobsDateTo, #allJobsRegFrom, #allJobsRegTo, #allJobsJobNumberFilter, #allJobsINumberFilter, #allJobsStatusFilter, #allJobsPortFilter').forEach(function (el) {
       el.addEventListener('change', function () { self.loadAllJobs(); });
     });
 
@@ -431,7 +431,8 @@ var APP = {
     cardsHtml += '<div class="card blueprint card-balance">' + CORNERS +
       '<div class="card-kicker">PPA Balance vs Forecasted Amount</div>' +
       '<div class="card-title big"' + (balCard.isLow ? ' style="color:var(--danger)"' : '') + '">' + this.money(balCard.ppaBalance) + '</div>' +
-      '<div class="card-meta">Forecast total: ' + this.money(balCard.forecastTotal) + '</div></div>';
+      '<div class="card-kicker">Forecast total</div>' +
+      '<div class="card-title big">' + this.money(balCard.forecastTotal) + '</div></div>';
 
     cardsHtml += '<div class="card blueprint card-request">' + CORNERS + '<div class="card-kicker">Request Amount — next 3 forecast rows</div><div class="card-title">Request Amount</div>';
     if (data.requestAmountCard.length) {
@@ -597,6 +598,8 @@ var APP = {
     var clientName = document.getElementById('allJobsClientFilter').value;
     var etaFrom = document.getElementById('allJobsDateFrom').value;
     var etaTo = document.getElementById('allJobsDateTo').value;
+    var regFrom = document.getElementById('allJobsRegFrom').value;
+    var regTo = document.getElementById('allJobsRegTo').value;
     var jobNumber = document.getElementById('allJobsJobNumberFilter').value;
     var iNumber = document.getElementById('allJobsINumberFilter').value;
     var status = document.getElementById('allJobsStatusFilter').value;
@@ -610,7 +613,7 @@ var APP = {
         document.getElementById('allJobsTable').innerHTML = self.renderAllJobsTable(rows);
       })
       .withFailureHandler(this.showFatalError)
-      .api_getAllJobs(this.token, clientName || '', etaFrom || '', etaTo || '', iNumber || '', status || '', jobNumber || '', port || '');
+      .api_getAllJobs(this.token, clientName || '', etaFrom || '', etaTo || '', iNumber || '', status || '', jobNumber || '', port || '', regFrom || '', regTo || '');
   },
 
   showAllJobsPlaceholder: function () {
@@ -621,8 +624,10 @@ var APP = {
     document.getElementById('allJobsPortFilter').value = '';
     document.getElementById('allJobsDateFrom').value = '';
     document.getElementById('allJobsDateTo').value = '';
+    document.getElementById('allJobsRegFrom').value = '';
+    document.getElementById('allJobsRegTo').value = '';
     document.getElementById('allJobsTable').innerHTML =
-      '<p class="muted">Select an ETA date range and/or client, then it will load automatically.</p>';
+      '<p class="muted">Select an ETA or Registration Date range and/or client, then it will load automatically.</p>';
   },
 
   renderAllJobsTable: function (rows) {
