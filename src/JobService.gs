@@ -30,13 +30,15 @@ function listTopUps_() {
 
 /**
  * Reports > All Jobs: every non-void job regardless of status, ETA
- * ascending. etaFrom/etaTo are inclusive "yyyy-MM-dd" bounds (matching
- * an HTML date input) — either or both may be blank for an open range.
- * iNumber and jobNumber are each a case-insensitive substring search,
- * blank = no filter. port is an exact match, blank = no filter.
- * Defaults to blank on the client so the tab never auto-loads every job.
+ * ascending. etaFrom/etaTo and regFrom/regTo are each inclusive
+ * "yyyy-MM-dd" bounds (matching an HTML date input) — either or both of
+ * a pair may be blank for an open range, and the ETA and Registration
+ * Date ranges are independent of each other. iNumber and jobNumber are
+ * each a case-insensitive substring search, blank = no filter. port is
+ * an exact match, blank = no filter. Defaults to blank on the client so
+ * the tab never auto-loads every job.
  */
-function listAllJobs_(clientName, branchFilterFn, etaFrom, etaTo, iNumber, status, jobNumber, port) {
+function listAllJobs_(clientName, branchFilterFn, etaFrom, etaTo, iNumber, status, jobNumber, port, regFrom, regTo) {
   var jobs = listJobs_().filter(function (j) {
     if (j['Void']) return false;
     if (clientName && j['Client Name'] !== clientName) return false;
@@ -48,6 +50,9 @@ function listAllJobs_(clientName, branchFilterFn, etaFrom, etaTo, iNumber, statu
     var eta = toIsoDateStr_(j['Vessel ETA']);
     if (etaFrom && eta < etaFrom) return false;
     if (etaTo && eta > etaTo) return false;
+    var registered = toIsoDateStr_(j['Registered Date']);
+    if (regFrom && registered < regFrom) return false;
+    if (regTo && registered > regTo) return false;
     return true;
   });
   jobs.sort(function (a, b) { return new Date(a['Vessel ETA']).getTime() - new Date(b['Vessel ETA']).getTime(); });
